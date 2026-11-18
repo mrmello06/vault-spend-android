@@ -104,6 +104,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.SpanStyle
@@ -114,6 +117,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneytracker.vault.ai.OfflineExpenseAiEngine
@@ -2459,18 +2463,56 @@ private fun CredProfileModalSheet(
         animateDismiss()
     }
 
-    // Intercept downward drag when list is not at top so user can scroll back up smoothly!
+    var gestureStartedAtTop by remember { mutableStateOf(true) }
+
+    // Intercept downward drag and flings when list is scrolled down so user can smoothly scroll back up without closing the sheet!
     val nestedScrollConnection = remember(listState) {
         object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y > 0f) {
+                    val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                    if (!isAtTop) {
+                        gestureStartedAtTop = false
+                    }
+                }
+                return Offset.Zero
+            }
+
             override fun onPostScroll(
                 consumed: Offset,
                 available: Offset,
                 source: NestedScrollSource
             ): Offset {
-                return if (available.y > 0f && listState.canScrollBackward) {
+                // If the gesture started while scrolled down, consume ALL excess downward scroll
+                // so the modal sheet NEVER gets pulled down during content scrolling!
+                return if (!gestureStartedAtTop && available.y > 0f) {
                     available
                 } else {
                     Offset.Zero
+                }
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (available.y > 0f) {
+                    val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                    if (!isAtTop) {
+                        gestureStartedAtTop = false
+                    }
+                }
+                return Velocity.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                val wasAtTop = gestureStartedAtTop
+                // Reset for next gesture
+                gestureStartedAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+
+                // If the fling started while scrolled down, consume ALL remaining downward fling velocity!
+                // This prevents forceful downward swipes from slamming the bottom sheet closed!
+                return if (!wasAtTop && available.y > 0f) {
+                    available
+                } else {
+                    Velocity.Zero
                 }
             }
         }
@@ -2485,6 +2527,9 @@ private fun CredProfileModalSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        modifier = Modifier
+            .statusBarsPadding()
+            .padding(top = 8.dp),
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 0.dp, bottomEnd = 0.dp),
         windowInsets = WindowInsets(0, 0, 0, 0),
@@ -2506,6 +2551,16 @@ private fun CredProfileModalSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .nestedScroll(nestedScrollConnection)
+                .pointerInput(listState) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.type == PointerEventType.Press) {
+                                gestureStartedAtTop = (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0)
+                            }
+                        }
+                    }
+                }
                 .navigationBarsPadding(),
             contentPadding = PaddingValues(horizontal = if (isLandscape) 28.dp else 18.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)

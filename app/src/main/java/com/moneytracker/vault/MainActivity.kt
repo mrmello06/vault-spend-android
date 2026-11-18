@@ -70,10 +70,7 @@ class MainActivity : FragmentActivity() {
 
         VaultColors.initTheme(applicationContext)
 
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
         enableEdgeToEdge()
         val initialHz = requestOptimalDisplayRefreshRate()
