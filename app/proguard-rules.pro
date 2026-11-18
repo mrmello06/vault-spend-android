@@ -1,0 +1,4 @@
+-keep class com.moneytracker.vault.data.local.** { *; }
+-keep class com.moneytracker.vault.domain.model.** { *; }
+-keepnames class * extends androidx.room.RoomDatabase
+-dontwarn kotlin.**
