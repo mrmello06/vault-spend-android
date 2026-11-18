@@ -33,6 +33,14 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
+import kotlin.random.Random
+
+enum class MoneyMatterFilter {
+    DEBITED,
+    CREDITED,
+    CARD_BILLS,
+    SELF_TRANSFER
+}
 
 data class VaultUiState(
     val selectedMonth: YearMonth = YearMonth.now(),
@@ -56,7 +64,9 @@ data class VaultUiState(
     val bankAccountSummaries: List<AccountSpendSummary> = emptyList(),
     val monthlyTrend: List<MonthlyTrendPoint> = emptyList(),
     val learnedMerchants: List<LearnedMerchantEntity> = emptyList(),
+    val aiSearchSuggestions: List<String> = emptyList(),
     val searchQuery: String = "",
+    val selectedMoneyMatter: MoneyMatterFilter? = null,
     val selectedCategory: SpendCategory? = null,
     val selectedAccountKey: String? = null,
     val selectedUpiApp: String? = null,
@@ -83,14 +93,16 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     private val selectedMonthFlow = MutableStateFlow(YearMonth.now())
     private val searchQueryFlow = MutableStateFlow("")
+    private val selectedMoneyMatterFlow = MutableStateFlow<MoneyMatterFilter?>(null)
     private val selectedCategoryFlow = MutableStateFlow<SpendCategory?>(null)
     private val selectedAccountFlow = MutableStateFlow<String?>(null)
     private val selectedUpiAppFlow = MutableStateFlow<String?>(null)
 
     private var undoTimerJob: Job? = null
 
-    private data class FilterQuad(
+    private data class FilterState(
         val query: String,
+        val moneyMatter: MoneyMatterFilter?,
         val category: SpendCategory?,
         val accountKey: String?,
         val upiApp: String?
@@ -102,7 +114,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         val statusBanner: String? = null,
         val undoDeletedTransaction: TransactionEntity? = null,
         val undoSecondsRemaining: Int = 0,
-        val sandboxResult: OfflineExpenseAiEngine.AiParseOutcome? = null
+        val sandboxResult: OfflineExpenseAiEngine.AiParseOutcome? = null,
+        val suggestionSeed: Long = System.nanoTime()
     )
 
     private val auxMetaFlow = MutableStateFlow(
@@ -115,10 +128,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     private val filtersFlow = combine(
         searchQueryFlow,
+        selectedMoneyMatterFlow,
         selectedCategoryFlow,
         selectedAccountFlow,
         selectedUpiAppFlow
-    ) { q, c, a, u -> FilterQuad(q, c, a, u) }
+    ) { q, mm, c, a, u -> FilterState(q, mm, c, a, u) }
 
     val uiState: StateFlow<VaultUiState> = combine(
         dao.observeAllTransactions(),
@@ -203,6 +217,20 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 txn.amount.toString().contains(q) ||
                 txn.amount.toInt().toString().contains(q)
 
+            val matchesMoneyMatter = when (filters.moneyMatter) {
+                null -> true
+                MoneyMatterFilter.DEBITED ->
+                    txn.type == TransactionType.DEBIT.name &&
+                        !txn.isSelfTransferEntry() &&
+                        !txn.isCardBillSettlement()
+                MoneyMatterFilter.CREDITED ->
+                    txn.type == TransactionType.CREDIT.name &&
+                        !txn.isSelfTransferEntry() &&
+                        !txn.isCardBillSettlement()
+                MoneyMatterFilter.CARD_BILLS -> txn.isCardBillSettlement()
+                MoneyMatterFilter.SELF_TRANSFER -> txn.isSelfTransferEntry()
+            }
+
             val matchesCat = filters.category == null ||
                 (filters.category == SpendCategory.SELF_TRANSFER && txn.isSelfTransferEntry()) ||
                 txn.category == filters.category.name
@@ -214,7 +242,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             val matchesUpi = filters.upiApp == null ||
                 (txn.paymentRail == PaymentRail.UPI.name && resolvedUpiApp.equals(filters.upiApp, ignoreCase = true))
 
-            matchesQuery && matchesCat && matchesAcct && matchesUpi
+            matchesQuery && matchesMoneyMatter && matchesCat && matchesAcct && matchesUpi
         }
 
         val catBreakdowns = if (totalDebited > 0.0) {
@@ -357,6 +385,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+        val aiSuggestions = buildDynamicAiSearchSuggestions(allTxns, aux.suggestionSeed)
+
         VaultUiState(
             selectedMonth = selectedYm,
             isCurrentMonthSelected = selectedYm == todayYm,
@@ -379,7 +409,9 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             bankAccountSummaries = bankAccounts,
             monthlyTrend = trendPoints,
             learnedMerchants = learnedList,
+            aiSearchSuggestions = aiSuggestions,
             searchQuery = filters.query,
+            selectedMoneyMatter = filters.moneyMatter,
             selectedCategory = filters.category,
             selectedAccountKey = filters.accountKey,
             selectedUpiApp = filters.upiApp,
@@ -417,8 +449,93 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         searchQueryFlow.value = query
     }
 
+    fun toggleMoneyMatterFilter(filter: MoneyMatterFilter) {
+        selectedCategoryFlow.value = null
+        selectedMoneyMatterFlow.value = if (selectedMoneyMatterFlow.value == filter) null else filter
+    }
+
     fun toggleCategoryFilter(category: SpendCategory?) {
-        selectedCategoryFlow.value = if (selectedCategoryFlow.value == category) null else category
+        selectedMoneyMatterFlow.value = null
+        selectedCategoryFlow.value = if (category == null || selectedCategoryFlow.value == category) null else category
+    }
+
+    fun shuffleSearchSuggestions() {
+        auxMetaFlow.value = auxMetaFlow.value.copy(suggestionSeed = System.nanoTime())
+    }
+
+    private fun buildDynamicAiSearchSuggestions(
+        allTxns: List<TransactionEntity>,
+        seed: Long
+    ): List<String> {
+        if (allTxns.isEmpty()) {
+            return listOf("UPI", "Credit Card", "Bank", "Wallet")
+        }
+
+        val genericPlaceholders = setOf(
+            "SELF ACCOUNT TRANSFER",
+            "DIRECT SPEND",
+            "BANK SPEND",
+            "CREDIT CARD SPEND",
+            "BANK CREDIT",
+            "WALLET SPEND",
+            "WALLET CREDIT",
+            "ACCOUNT TRANSFER",
+            "ATM CASH WITHDRAWAL",
+            "CREDIT CARD BILL",
+            "WALLET LOAD / TRANSFER"
+        )
+
+        val merchantCandidates = allTxns
+            .asSequence()
+            .map { it.merchantDisplayName.trim() }
+            .filter { name ->
+                name.length in 3..22 &&
+                    !name.contains("••") &&
+                    !name.startsWith("UPI ", ignoreCase = true) &&
+                    !name.startsWith("Bank A/c", ignoreCase = true) &&
+                    name.uppercase(Locale.US) !in genericPlaceholders
+            }
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedByDescending { it.value }
+            .take(18)
+            .map { it.key }
+
+        val bankAndAppCandidates = buildList {
+            allTxns.map { it.bankName.trim() }
+                .filter { it.length in 3..16 && !it.equals("Bank", ignoreCase = true) }
+                .distinct()
+                .take(5)
+                .let { addAll(it) }
+
+            allTxns.map { it.upiApp.trim() }
+                .filter { it.length in 3..14 && !it.equals("Bank UPI", ignoreCase = true) }
+                .distinct()
+                .take(4)
+                .let { addAll(it) }
+        }
+
+        val noteCandidates = allTxns
+            .map { it.note.trim() }
+            .filter { it.length in 3..18 }
+            .distinct()
+            .take(5)
+
+        val categoryCandidates = allTxns
+            .map { SpendCategory.fromNameOrDefault(it.category).displayName }
+            .filter { !it.equals("Others", ignoreCase = true) }
+            .distinct()
+            .take(6)
+
+        val pool = (merchantCandidates + noteCandidates + bankAndAppCandidates + categoryCandidates)
+            .distinctBy { it.lowercase(Locale.US) }
+
+        if (pool.isEmpty()) {
+            return listOf("UPI", "Credit Card", "Bank")
+        }
+
+        return pool.shuffled(Random(seed)).take(6)
     }
 
     fun toggleAccountFilter(accountKey: String?) {
@@ -458,7 +575,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             auxMetaFlow.value = auxMetaFlow.value.copy(
                 isSyncing = false,
                 aiTrainingStatus = statsLabel,
-                statusBanner = msg ?: auxMetaFlow.value.statusBanner
+                statusBanner = msg ?: auxMetaFlow.value.statusBanner,
+                suggestionSeed = if (result.newlyInserted > 0) System.nanoTime() else auxMetaFlow.value.suggestionSeed
             )
         }
     }

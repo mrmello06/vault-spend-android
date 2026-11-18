@@ -12,20 +12,24 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -33,6 +37,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,7 +68,6 @@ import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Stars
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -131,6 +137,7 @@ private enum class InstrumentSubTab(val label: String) {
     WALLETS("WALLETS")
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MainVaultScreen(
     uiState: VaultUiState,
@@ -146,6 +153,8 @@ fun MainVaultScreen(
     onJumpToCurrentMonth: () -> Unit,
     onSelectYearMonth: (String) -> Unit,
     onSearchQueryChange: (String) -> Unit,
+    onShuffleSuggestions: () -> Unit,
+    onToggleMoneyMatterFilter: (MoneyMatterFilter) -> Unit,
     onToggleCategoryFilter: (SpendCategory?) -> Unit,
     onToggleAccountFilter: (String?) -> Unit,
     onToggleUpiAppFilter: (String?) -> Unit,
@@ -162,20 +171,28 @@ fun MainVaultScreen(
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    var activeTabOrdinal by rememberSaveable { mutableIntStateOf(CredDockTab.HOME.ordinal) }
+    val pagerState = rememberPagerState(
+        initialPage = CredDockTab.HOME.ordinal,
+        pageCount = { CredDockTab.entries.size }
+    )
     var instrumentSubTabIndex by rememberSaveable { mutableIntStateOf(InstrumentSubTab.CREDIT_CARDS.ordinal) }
     var inspectingTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
 
     val homeListState = rememberLazyListState()
     val searchFocusRequester = remember { FocusRequester() }
 
-    val activeTab = CredDockTab.entries[activeTabOrdinal]
+    val activeTab = CredDockTab.entries[pagerState.currentPage]
 
-    // Back from secondary tabs -> HOME; Back from HOME -> close app cleanly
-    BackHandler(enabled = activeTab != CredDockTab.HOME) {
-        activeTabOrdinal = CredDockTab.HOME.ordinal
+    // Back from secondary tabs -> smoothly swipe back to HOME; Back from HOME -> close app cleanly
+    BackHandler(enabled = pagerState.currentPage != CredDockTab.HOME.ordinal) {
+        scope.launch {
+            pagerState.animateScrollToPage(
+                page = CredDockTab.HOME.ordinal,
+                animationSpec = tween(280, easing = FastOutSlowInEasing)
+            )
+        }
     }
-    BackHandler(enabled = activeTab == CredDockTab.HOME) {
+    BackHandler(enabled = pagerState.currentPage == CredDockTab.HOME.ordinal) {
         onExitApp()
     }
 
@@ -219,8 +236,11 @@ fun MainVaultScreen(
                     },
                     onSearchIconClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        activeTabOrdinal = CredDockTab.HOME.ordinal
                         scope.launch {
+                            pagerState.animateScrollToPage(
+                                page = CredDockTab.HOME.ordinal,
+                                animationSpec = tween(280, easing = FastOutSlowInEasing)
+                            )
                             homeListState.animateScrollToItem(2)
                             runCatching { searchFocusRequester.requestFocus() }
                         }
@@ -271,23 +291,14 @@ fun MainVaultScreen(
                 }
 
                 // =========================================================================
-                // DIRECTIONAL HORIZONTAL SLIDE ANIMATION (LEFT-TO-RIGHT & RIGHT-TO-LEFT)
+                // FULL-SCREEN SWIPEABLE HORIZONTAL PAGER (SWIPE LEFT/RIGHT OR TAP TABS)
                 // =========================================================================
-                AnimatedContent(
-                    targetState = activeTab,
-                    transitionSpec = {
-                        val movingRight = targetState.ordinal > initialState.ordinal
-                        if (movingRight) {
-                            (slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { w -> w } + fadeIn(tween(200)))
-                                .togetherWith(slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { w -> -w } + fadeOut(tween(180)))
-                        } else {
-                            (slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { w -> -w } + fadeIn(tween(200)))
-                                .togetherWith(slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { w -> w } + fadeOut(tween(180)))
-                        }
-                    },
-                    label = "directionalTabSlide"
-                ) { tab ->
-                    when (tab) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    beyondBoundsPageCount = 1
+                ) { pageIndex ->
+                    when (CredDockTab.entries[pageIndex]) {
                         CredDockTab.HOME -> CredHomeSheetContent(
                             uiState = uiState,
                             listState = homeListState,
@@ -298,10 +309,17 @@ fun MainVaultScreen(
                             onClearSampleSms = onClearSampleSms,
                             onJumpToCurrentMonth = onJumpToCurrentMonth,
                             onSearchQueryChange = onSearchQueryChange,
+                            onShuffleSuggestions = onShuffleSuggestions,
+                            onToggleMoneyMatterFilter = onToggleMoneyMatterFilter,
                             onToggleCategoryFilter = onToggleCategoryFilter,
                             onClearDrilldownFilters = onClearDrilldownFilters,
                             onOpenInsightsTab = {
-                                activeTabOrdinal = CredDockTab.INSIGHTS.ordinal
+                                scope.launch {
+                                    pagerState.animateScrollToPage(
+                                        page = CredDockTab.INSIGHTS.ordinal,
+                                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                    )
+                                }
                             },
                             onTransactionClick = { inspectingTransaction = it }
                         )
@@ -312,11 +330,21 @@ fun MainVaultScreen(
                             onSelectSubTabIndex = { instrumentSubTabIndex = it },
                             onSelectAccount = { acctKey ->
                                 onToggleAccountFilter(acctKey)
-                                activeTabOrdinal = CredDockTab.HOME.ordinal
+                                scope.launch {
+                                    pagerState.animateScrollToPage(
+                                        page = CredDockTab.HOME.ordinal,
+                                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                    )
+                                }
                             },
                             onSelectUpiApp = { upiApp ->
                                 onToggleUpiAppFilter(upiApp)
-                                activeTabOrdinal = CredDockTab.HOME.ordinal
+                                scope.launch {
+                                    pagerState.animateScrollToPage(
+                                        page = CredDockTab.HOME.ordinal,
+                                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                    )
+                                }
                             }
                         )
 
@@ -327,7 +355,12 @@ fun MainVaultScreen(
                             onSelectYearMonth = onSelectYearMonth,
                             onCategoryClick = { cat ->
                                 onToggleCategoryFilter(cat)
-                                activeTabOrdinal = CredDockTab.HOME.ordinal
+                                scope.launch {
+                                    pagerState.animateScrollToPage(
+                                        page = CredDockTab.HOME.ordinal,
+                                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                    )
+                                }
                             }
                         )
 
@@ -415,13 +448,19 @@ fun MainVaultScreen(
         }
 
         // =========================================================================
-        // SLIM, COMPACT 4-SLOT #000000 AMOLED BOTTOM MENU (HOME | CARDS | INSIGHTS | MORE)
+        // ELEVATED 4-SLOT BOTTOM DOCK WITH LIQUID GLASS SLIDING INDICATOR LAYER
         // =========================================================================
-        CredSlimBottomBar(
+        CredLiquidGlassBottomBar(
+            pagerState = pagerState,
             activeTab = activeTab,
             onSelectTab = { nextTab ->
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                activeTabOrdinal = nextTab.ordinal
+                scope.launch {
+                    pagerState.animateScrollToPage(
+                        page = nextTab.ordinal,
+                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                    )
+                }
             }
         )
     }
@@ -632,55 +671,112 @@ private fun CredTopBar(
 }
 
 /**
- * Compact 4-Slot #000000 AMOLED Bottom Navigation Bar (Minimal Height, No Center UPI Orb)
+ * Elevated 4-Slot #000000 Bottom Navigation Dock with Sliding "Liquid Glass" Selection Lens
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CredSlimBottomBar(
+private fun CredLiquidGlassBottomBar(
+    pagerState: PagerState,
     activeTab: CredDockTab,
     onSelectTab: (CredDockTab) -> Unit
 ) {
-    Column(
+    val livePagePosition = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+        .coerceIn(0f, (CredDockTab.entries.size - 1).toFloat())
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .background(VaultColors.AmoledBlack)
             .navigationBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
-        HorizontalDivider(color = Color(0xFF1D202A), thickness = 0.8.dp)
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
+                .height(58.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF0C0E14))
+                .border(1.dp, Color(0xFF232838), RoundedCornerShape(24.dp))
+                .padding(4.dp)
         ) {
-            CredSlimDockItem(
-                label = "HOME",
-                selected = activeTab == CredDockTab.HOME,
-                icon = if (activeTab == CredDockTab.HOME) Icons.Filled.Home else Icons.Outlined.Home,
-                onClick = { onSelectTab(CredDockTab.HOME) },
-                modifier = Modifier.weight(1f)
-            )
-            CredSlimDockItem(
-                label = "CARDS",
-                selected = activeTab == CredDockTab.CARDS,
-                icon = Icons.Outlined.CreditCard,
-                onClick = { onSelectTab(CredDockTab.CARDS) },
-                modifier = Modifier.weight(1f)
-            )
-            CredSlimDockItem(
-                label = "INSIGHTS",
-                selected = activeTab == CredDockTab.INSIGHTS,
-                icon = Icons.Outlined.Stars,
-                onClick = { onSelectTab(CredDockTab.INSIGHTS) },
-                modifier = Modifier.weight(1f)
-            )
-            CredSlimDockItem(
-                label = "MORE",
-                selected = activeTab == CredDockTab.MORE,
-                icon = Icons.Outlined.GridView,
-                onClick = { onSelectTab(CredDockTab.MORE) },
-                modifier = Modifier.weight(1f)
-            )
+            val slotWidth = maxWidth / CredDockTab.entries.size
+
+            // =========================================================================
+            // LIQUID GLASS SLIDING INDICATOR LAYER (TRACKS SWIPE & TAP IN REAL TIME)
+            // =========================================================================
+            Box(
+                modifier = Modifier
+                    .offset(x = slotWidth * livePagePosition)
+                    .width(slotWidth)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.24f),
+                                Color(0xFFA5C9FF).copy(alpha = 0.10f),
+                                Color.White.copy(alpha = 0.14f)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.2.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.68f),
+                                Color.White.copy(alpha = 0.12f),
+                                Color(0xFF93C5FD).copy(alpha = 0.45f)
+                            )
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+            ) {
+                // Specular Liquid Glass Top Rim Gleam
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 1.dp)
+                        .fillMaxWidth(0.55f)
+                        .height(1.5.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.55f))
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CredSlimDockItem(
+                    label = "HOME",
+                    selected = activeTab == CredDockTab.HOME,
+                    icon = if (activeTab == CredDockTab.HOME) Icons.Filled.Home else Icons.Outlined.Home,
+                    onClick = { onSelectTab(CredDockTab.HOME) },
+                    modifier = Modifier.weight(1f)
+                )
+                CredSlimDockItem(
+                    label = "CARDS",
+                    selected = activeTab == CredDockTab.CARDS,
+                    icon = Icons.Outlined.CreditCard,
+                    onClick = { onSelectTab(CredDockTab.CARDS) },
+                    modifier = Modifier.weight(1f)
+                )
+                CredSlimDockItem(
+                    label = "INSIGHTS",
+                    selected = activeTab == CredDockTab.INSIGHTS,
+                    icon = Icons.Outlined.Stars,
+                    onClick = { onSelectTab(CredDockTab.INSIGHTS) },
+                    modifier = Modifier.weight(1f)
+                )
+                CredSlimDockItem(
+                    label = "MORE",
+                    selected = activeTab == CredDockTab.MORE,
+                    icon = Icons.Outlined.GridView,
+                    onClick = { onSelectTab(CredDockTab.MORE) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
@@ -695,25 +791,26 @@ private fun CredSlimDockItem(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 3.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (selected) Color.White else Color(0xFF7D8391),
-            modifier = Modifier.size(19.dp)
+            tint = if (selected) Color.White else Color(0xFF8A91A0),
+            modifier = Modifier.size(21.dp)
         )
-        Spacer(modifier = Modifier.height(2.dp))
+        Spacer(modifier = Modifier.height(3.dp))
         Text(
             text = label,
             fontFamily = CredSansFontFamily,
-            fontSize = 8.5.sp,
+            fontSize = 9.5.sp,
             fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
             letterSpacing = 1.1.sp,
-            color = if (selected) Color.White else Color(0xFF757B88)
+            color = if (selected) Color.White else Color(0xFF828998)
         )
     }
 }
@@ -732,11 +829,14 @@ private fun CredHomeSheetContent(
     onClearSampleSms: () -> Unit,
     onJumpToCurrentMonth: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
+    onShuffleSuggestions: () -> Unit,
+    onToggleMoneyMatterFilter: (MoneyMatterFilter) -> Unit,
     onToggleCategoryFilter: (SpendCategory?) -> Unit,
     onClearDrilldownFilters: () -> Unit,
     onOpenInsightsTab: () -> Unit,
     onTransactionClick: (TransactionEntity) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     val groupedByDay = remember(uiState.filteredTransactions) {
         uiState.filteredTransactions.groupBy { VaultFormatters.formatDayGroup(it.timestamp) }
     }
@@ -876,15 +976,24 @@ private fun CredHomeSheetContent(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    val isDebitedSel = uiState.selectedMoneyMatter == MoneyMatterFilter.DEBITED
+                    val isCreditedSel = uiState.selectedMoneyMatter == MoneyMatterFilter.CREDITED
+                    val isCardBillsSel = uiState.selectedMoneyMatter == MoneyMatterFilter.CARD_BILLS
+                    val isSelfSel = uiState.selectedMoneyMatter == MoneyMatterFilter.SELF_TRANSFER
+
                     CredMoneyMatterCapsule(
                         title = "debited",
                         subtitle = "excl. self",
                         amount = uiState.monthTotalDebited,
                         prefix = "-",
                         amountColor = VaultColors.DebitRed,
-                        bgColor = VaultColors.CardSurface,
-                        borderColor = VaultColors.CredBorderStrong,
-                        onClick = { onToggleCategoryFilter(null) }
+                        selected = isDebitedSel,
+                        bgColor = if (isDebitedSel) VaultColors.DebitRed.copy(alpha = 0.16f) else VaultColors.CardSurface,
+                        borderColor = if (isDebitedSel) VaultColors.DebitRed else VaultColors.CredBorderStrong,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleMoneyMatterFilter(MoneyMatterFilter.DEBITED)
+                        }
                     )
 
                     CredMoneyMatterCapsule(
@@ -893,9 +1002,13 @@ private fun CredHomeSheetContent(
                         amount = uiState.monthTotalCredited,
                         prefix = "+",
                         amountColor = VaultColors.CreditGreen,
-                        bgColor = VaultColors.CardSurface,
-                        borderColor = VaultColors.CredBorderStrong,
-                        onClick = { onToggleCategoryFilter(null) }
+                        selected = isCreditedSel,
+                        bgColor = if (isCreditedSel) VaultColors.CreditGreen.copy(alpha = 0.16f) else VaultColors.CardSurface,
+                        borderColor = if (isCreditedSel) VaultColors.CreditGreen else VaultColors.CredBorderStrong,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleMoneyMatterFilter(MoneyMatterFilter.CREDITED)
+                        }
                     )
 
                     CredMoneyMatterCapsule(
@@ -904,9 +1017,13 @@ private fun CredHomeSheetContent(
                         amount = uiState.monthCardBillsPaidTotal,
                         prefix = "",
                         amountColor = VaultColors.CardBillBlue,
-                        bgColor = if (uiState.selectedCategory == SpendCategory.CREDIT_CARD_BILL) VaultColors.CardBillBg else VaultColors.CardSurface,
-                        borderColor = if (uiState.selectedCategory == SpendCategory.CREDIT_CARD_BILL) VaultColors.CardBillBlue else VaultColors.CredBorderStrong,
-                        onClick = { onToggleCategoryFilter(SpendCategory.CREDIT_CARD_BILL) }
+                        selected = isCardBillsSel,
+                        bgColor = if (isCardBillsSel) VaultColors.CardBillBg else VaultColors.CardSurface,
+                        borderColor = if (isCardBillsSel) VaultColors.CardBillBlue else VaultColors.CredBorderStrong,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleMoneyMatterFilter(MoneyMatterFilter.CARD_BILLS)
+                        }
                     )
 
                     CredMoneyMatterCapsule(
@@ -915,9 +1032,13 @@ private fun CredHomeSheetContent(
                         amount = uiState.monthSelfTransferTotal,
                         prefix = "⇄ ",
                         amountColor = VaultColors.SelfYellowText,
-                        bgColor = VaultColors.SelfYellowBg,
-                        borderColor = VaultColors.SelfYellowBorder,
-                        onClick = { onToggleCategoryFilter(SpendCategory.SELF_TRANSFER) }
+                        selected = isSelfSel,
+                        bgColor = if (isSelfSel) VaultColors.SelfYellowBg else VaultColors.CardSurface,
+                        borderColor = if (isSelfSel) VaultColors.SelfYellowText else VaultColors.CredBorderStrong,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleMoneyMatterFilter(MoneyMatterFilter.SELF_TRANSFER)
+                        }
                     )
                 }
             }
@@ -1063,7 +1184,7 @@ private fun CredHomeSheetContent(
                     }
                 }
 
-                // Quick Search Suggestion Chips
+                // Dynamic AI Search Suggestion Chips (randomly extracted from real SMS ledger!)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1071,7 +1192,16 @@ private fun CredHomeSheetContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onShuffleSuggestions()
+                            }
+                            .padding(horizontal = 4.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             text = "TRY",
                             style = MaterialTheme.typography.labelSmall,
@@ -1079,12 +1209,12 @@ private fun CredHomeSheetContent(
                         )
                         Icon(
                             imageVector = Icons.Outlined.Bolt,
-                            contentDescription = null,
+                            contentDescription = "Refresh AI suggestions",
                             tint = Color(0xFFF59E0B),
                             modifier = Modifier.size(13.dp)
                         )
                     }
-                    listOf("CRED Club", "IRCTC", "Swiggy", "Google").forEach { term ->
+                    uiState.aiSearchSuggestions.forEach { term ->
                         val active = uiState.searchQuery.equals(term, ignoreCase = true)
                         Box(
                             modifier = Modifier
@@ -1145,13 +1275,13 @@ private fun CredHomeSheetContent(
                         color = VaultColors.InkSecondary
                     )
                     Text(
-                        text = if (uiState.selectedCategory != null) "show all >" else "insights >",
+                        text = if (uiState.selectedCategory != null || uiState.selectedMoneyMatter != null) "show all >" else "insights >",
                         fontFamily = CredSansFontFamily,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = VaultColors.InkSecondary,
                         modifier = Modifier.clickable {
-                            if (uiState.selectedCategory != null) {
+                            if (uiState.selectedCategory != null || uiState.selectedMoneyMatter != null) {
                                 onToggleCategoryFilter(null)
                             } else {
                                 onOpenInsightsTab()
@@ -1169,7 +1299,7 @@ private fun CredHomeSheetContent(
                     CredExplorePill(
                         label = "all spends",
                         accentColor = VaultColors.InkPrimary,
-                        selected = uiState.selectedCategory == null,
+                        selected = uiState.selectedCategory == null && uiState.selectedMoneyMatter == null,
                         onClick = { onToggleCategoryFilter(null) }
                     )
                     SpendCategory.entries.forEach { cat ->
@@ -1262,6 +1392,7 @@ private fun CredMoneyMatterCapsule(
     amount: Double,
     prefix: String,
     amountColor: Color,
+    selected: Boolean,
     bgColor: Color,
     borderColor: Color,
     onClick: () -> Unit
@@ -1271,7 +1402,7 @@ private fun CredMoneyMatterCapsule(
             .height(50.dp)
             .clip(RoundedCornerShape(50))
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(50))
+            .border(if (selected) 1.6.dp else 1.dp, borderColor, RoundedCornerShape(50))
             .clickable(onClick = onClick)
             .padding(horizontal = 15.dp),
         verticalAlignment = Alignment.CenterVertically,

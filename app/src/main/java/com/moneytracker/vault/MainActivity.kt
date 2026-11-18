@@ -181,6 +181,8 @@ class MainActivity : FragmentActivity() {
                             onJumpToCurrentMonth = { vaultViewModel.jumpToCurrentMonth() },
                             onSelectYearMonth = { vaultViewModel.selectYearMonthKey(it) },
                             onSearchQueryChange = { vaultViewModel.setSearchQuery(it) },
+                            onShuffleSuggestions = { vaultViewModel.shuffleSearchSuggestions() },
+                            onToggleMoneyMatterFilter = { vaultViewModel.toggleMoneyMatterFilter(it) },
                             onToggleCategoryFilter = { vaultViewModel.toggleCategoryFilter(it) },
                             onToggleAccountFilter = { vaultViewModel.toggleAccountFilter(it) },
                             onToggleUpiAppFilter = { vaultViewModel.toggleUpiAppFilter(it) },
