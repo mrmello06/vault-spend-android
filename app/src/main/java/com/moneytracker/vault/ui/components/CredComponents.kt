@@ -203,9 +203,16 @@ fun RollingOdometerAmount(
     exactDecimals: Boolean = true
 ) {
     var previousAmount by remember { mutableDoubleStateOf(amount) }
+    var hasChangedSinceMount by remember { mutableStateOf(false) }
+
+    val deltaDetected = amount != previousAmount
     val isGoingUp = amount >= previousAmount
+
     SideEffect {
-        previousAmount = amount
+        if (deltaDetected) {
+            hasChangedSinceMount = true
+            previousAmount = amount
+        }
     }
 
     val uniformNumberStyle = style.copy(
@@ -214,6 +221,17 @@ fun RollingOdometerAmount(
     )
 
     val formatted = "$prefix${VaultFormatters.formatInr(amount, exactDecimals)}"
+
+    if (!hasChangedSinceMount && !deltaDetected) {
+        Text(
+            text = formatted,
+            style = uniformNumberStyle,
+            color = color,
+            modifier = modifier,
+            maxLines = 1
+        )
+        return
+    }
 
     Row(
         modifier = modifier,
@@ -225,11 +243,11 @@ fun RollingOdometerAmount(
                     targetState = ch,
                     transitionSpec = {
                         if (isGoingUp) {
-                            (slideInVertically(tween(300, easing = FastOutSlowInEasing)) { h -> h } + fadeIn(tween(200)))
-                                .togetherWith(slideOutVertically(tween(300, easing = FastOutSlowInEasing)) { h -> -h } + fadeOut(tween(160)))
+                            (slideInVertically(tween(280, easing = FastOutSlowInEasing)) { h -> h } + fadeIn(tween(180)))
+                                .togetherWith(slideOutVertically(tween(280, easing = FastOutSlowInEasing)) { h -> -h } + fadeOut(tween(150)))
                         } else {
-                            (slideInVertically(tween(300, easing = FastOutSlowInEasing)) { h -> -h } + fadeIn(tween(200)))
-                                .togetherWith(slideOutVertically(tween(300, easing = FastOutSlowInEasing)) { h -> h } + fadeOut(tween(160)))
+                            (slideInVertically(tween(280, easing = FastOutSlowInEasing)) { h -> -h } + fadeIn(tween(180)))
+                                .togetherWith(slideOutVertically(tween(280, easing = FastOutSlowInEasing)) { h -> h } + fadeOut(tween(150)))
                         }
                     },
                     label = "odometerDigit_$index"

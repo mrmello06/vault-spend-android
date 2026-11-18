@@ -1,5 +1,8 @@
 package com.moneytracker.vault.domain.model
 
+import androidx.compose.runtime.Immutable
+import com.moneytracker.vault.data.local.TransactionEntity
+
 enum class TransactionType(val label: String) {
     DEBIT("Debited"),
     CREDIT("Credited")
@@ -20,6 +23,14 @@ enum class PaymentRail(val label: String, val badgeText: String) {
     }
 }
 
+@Immutable
+data class DayTransactionGroup(
+    val dayHeader: String,
+    val dayDebitTotal: Double,
+    val transactions: List<TransactionEntity>
+)
+
+@Immutable
 data class CategoryBreakdown(
     val category: SpendCategory,
     val totalAmount: Double,
@@ -27,6 +38,7 @@ data class CategoryBreakdown(
     val percentage: Float
 )
 
+@Immutable
 data class MerchantSummary(
     val merchantDisplayName: String,
     val rawCodeSample: String,
@@ -36,6 +48,7 @@ data class MerchantSummary(
     val isSubscription: Boolean
 )
 
+@Immutable
 data class AccountSpendSummary(
     val key: String,
     val bankName: String,
@@ -46,6 +59,7 @@ data class AccountSpendSummary(
     val transactionCount: Int
 )
 
+@Immutable
 data class UpiChannelSummary(
     val appName: String,
     val linkedBanksLabel: String,
@@ -55,6 +69,7 @@ data class UpiChannelSummary(
     val sharePercentage: Float
 )
 
+@Immutable
 data class WalletSummary(
     val walletName: String,
     val totalSpent: Double,
@@ -62,6 +77,7 @@ data class WalletSummary(
     val transactionCount: Int
 )
 
+@Immutable
 data class MonthlyTrendPoint(
     val yearMonthKey: String,
     val shortLabel: String,

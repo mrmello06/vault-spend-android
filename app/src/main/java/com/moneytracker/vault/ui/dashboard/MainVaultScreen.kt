@@ -1,17 +1,15 @@
 package com.moneytracker.vault.ui.dashboard
 
+import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,7 +17,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -29,7 +26,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -75,6 +71,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -94,7 +91,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -144,6 +143,7 @@ fun MainVaultScreen(
     hasSmsPermission: Boolean,
     hasSecurityQuestionsSet: Boolean,
     isAmoledDark: Boolean,
+    refreshRateHz: Int = 60,
     onToggleAmoledTheme: () -> Unit,
     onRequestSmsPermission: () -> Unit,
     onSyncSms: () -> Unit,
@@ -171,6 +171,8 @@ fun MainVaultScreen(
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     val pagerState = rememberPagerState(
         initialPage = CredDockTab.HOME.ordinal,
         pageCount = { CredDockTab.entries.size }
@@ -181,18 +183,18 @@ fun MainVaultScreen(
     val homeListState = rememberLazyListState()
     val searchFocusRequester = remember { FocusRequester() }
 
-    val activeTab = CredDockTab.entries[pagerState.currentPage]
+    // Derived boolean so MainVaultScreen NEVER recomposes mid-swipe!
+    val isOnHomeTab by remember { derivedStateOf { pagerState.currentPage == CredDockTab.HOME.ordinal } }
 
-    // Back from secondary tabs -> smoothly swipe back to HOME; Back from HOME -> close app cleanly
-    BackHandler(enabled = pagerState.currentPage != CredDockTab.HOME.ordinal) {
+    BackHandler(enabled = !isOnHomeTab) {
         scope.launch {
             pagerState.animateScrollToPage(
                 page = CredDockTab.HOME.ordinal,
-                animationSpec = tween(280, easing = FastOutSlowInEasing)
+                animationSpec = tween(260, easing = FastOutSlowInEasing)
             )
         }
     }
-    BackHandler(enabled = pagerState.currentPage == CredDockTab.HOME.ordinal) {
+    BackHandler(enabled = isOnHomeTab) {
         onExitApp()
     }
 
@@ -218,6 +220,7 @@ fun MainVaultScreen(
                     isCurrentMonth = uiState.isCurrentMonthSelected,
                     isSyncing = uiState.isSyncing,
                     isAmoledDark = isAmoledDark,
+                    isLandscape = isLandscape,
                     onToggleTheme = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onToggleAmoledTheme()
@@ -291,16 +294,18 @@ fun MainVaultScreen(
                 }
 
                 // =========================================================================
-                // FULL-SCREEN SWIPEABLE HORIZONTAL PAGER (SWIPE LEFT/RIGHT OR TAP TABS)
+                // FULL-SCREEN SWIPEABLE HORIZONTAL PAGER (GPU LAYER-ACCELERATED, ZERO FLICKER)
                 // =========================================================================
                 HorizontalPager(
                     state = pagerState,
+                    key = { page -> page },
                     modifier = Modifier.fillMaxSize(),
                     beyondBoundsPageCount = 1
                 ) { pageIndex ->
                     when (CredDockTab.entries[pageIndex]) {
                         CredDockTab.HOME -> CredHomeSheetContent(
                             uiState = uiState,
+                            isLandscape = isLandscape,
                             listState = homeListState,
                             searchFocusRequester = searchFocusRequester,
                             hasSmsPermission = hasSmsPermission,
@@ -317,7 +322,7 @@ fun MainVaultScreen(
                                 scope.launch {
                                     pagerState.animateScrollToPage(
                                         page = CredDockTab.INSIGHTS.ordinal,
-                                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                        animationSpec = tween(260, easing = FastOutSlowInEasing)
                                     )
                                 }
                             },
@@ -326,6 +331,7 @@ fun MainVaultScreen(
 
                         CredDockTab.CARDS -> CardsUpiWalletsSheet(
                             uiState = uiState,
+                            isLandscape = isLandscape,
                             selectedSubTabIndex = instrumentSubTabIndex,
                             onSelectSubTabIndex = { instrumentSubTabIndex = it },
                             onSelectAccount = { acctKey ->
@@ -333,7 +339,7 @@ fun MainVaultScreen(
                                 scope.launch {
                                     pagerState.animateScrollToPage(
                                         page = CredDockTab.HOME.ordinal,
-                                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                        animationSpec = tween(260, easing = FastOutSlowInEasing)
                                     )
                                 }
                             },
@@ -342,7 +348,7 @@ fun MainVaultScreen(
                                 scope.launch {
                                     pagerState.animateScrollToPage(
                                         page = CredDockTab.HOME.ordinal,
-                                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                        animationSpec = tween(260, easing = FastOutSlowInEasing)
                                     )
                                 }
                             }
@@ -350,6 +356,7 @@ fun MainVaultScreen(
 
                         CredDockTab.INSIGHTS -> CredInsightsSheet(
                             uiState = uiState,
+                            isLandscape = isLandscape,
                             onShiftMonth = onShiftMonth,
                             onJumpToCurrentMonth = onJumpToCurrentMonth,
                             onSelectYearMonth = onSelectYearMonth,
@@ -358,7 +365,7 @@ fun MainVaultScreen(
                                 scope.launch {
                                     pagerState.animateScrollToPage(
                                         page = CredDockTab.HOME.ordinal,
-                                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                        animationSpec = tween(260, easing = FastOutSlowInEasing)
                                     )
                                 }
                             }
@@ -367,6 +374,8 @@ fun MainVaultScreen(
                         CredDockTab.MORE -> CredMoreAiRulesSheet(
                             uiState = uiState,
                             isAmoledDark = isAmoledDark,
+                            isLandscape = isLandscape,
+                            refreshRateHz = refreshRateHz,
                             hasSecurityQuestionsSet = hasSecurityQuestionsSet,
                             onToggleAmoledTheme = onToggleAmoledTheme,
                             onRunSandbox = onRunSandboxSms,
@@ -448,17 +457,17 @@ fun MainVaultScreen(
         }
 
         // =========================================================================
-        // ELEVATED 4-SLOT BOTTOM DOCK WITH LIQUID GLASS SLIDING INDICATOR LAYER
+        // ELEVATED 4-SLOT BOTTOM DOCK WITH GPU LIQUID GLASS SLIDING INDICATOR
         // =========================================================================
         CredLiquidGlassBottomBar(
             pagerState = pagerState,
-            activeTab = activeTab,
+            isLandscape = isLandscape,
             onSelectTab = { nextTab ->
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 scope.launch {
                     pagerState.animateScrollToPage(
                         page = nextTab.ordinal,
-                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        animationSpec = tween(260, easing = FastOutSlowInEasing)
                     )
                 }
             }
@@ -493,6 +502,7 @@ private fun CredTopBar(
     isCurrentMonth: Boolean,
     isSyncing: Boolean,
     isAmoledDark: Boolean,
+    isLandscape: Boolean,
     onToggleTheme: () -> Unit,
     onPrevMonth: () -> Unit,
     onNextMonth: () -> Unit,
@@ -506,7 +516,10 @@ private fun CredTopBar(
             .fillMaxWidth()
             .background(VaultColors.CredWhite)
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(
+                horizontal = if (isLandscape) 24.dp else 16.dp,
+                vertical = if (isLandscape) 5.dp else 10.dp
+            ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -671,76 +684,83 @@ private fun CredTopBar(
 }
 
 /**
- * Elevated 4-Slot #000000 Bottom Navigation Dock with Sliding "Liquid Glass" Selection Lens
+ * Elevated 4-Slot #000000 Bottom Navigation Dock with GPU RenderThread "Liquid Glass" Lens
+ * Zero recomposition and zero layout passes per frame at 60Hz / 120Hz / 144Hz!
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CredLiquidGlassBottomBar(
     pagerState: PagerState,
-    activeTab: CredDockTab,
+    isLandscape: Boolean,
     onSelectTab: (CredDockTab) -> Unit
 ) {
-    val livePagePosition = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
-        .coerceIn(0f, (CredDockTab.entries.size - 1).toFloat())
+    val tabCount = CredDockTab.entries.size
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .background(VaultColors.AmoledBlack)
             .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .padding(
+                horizontal = if (isLandscape) 28.dp else 14.dp,
+                vertical = if (isLandscape) 5.dp else 10.dp
+            )
     ) {
-        BoxWithConstraints(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(58.dp)
+                .height(if (isLandscape) 46.dp else 58.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xFF0C0E14))
                 .border(1.dp, Color(0xFF232838), RoundedCornerShape(24.dp))
                 .padding(4.dp)
         ) {
-            val slotWidth = maxWidth / CredDockTab.entries.size
-
             // =========================================================================
-            // LIQUID GLASS SLIDING INDICATOR LAYER (TRACKS SWIPE & TAP IN REAL TIME)
+            // GPU-ACCELERATED LIQUID GLASS LENS (0 RECOMPOSITIONS, 0 RE-LAYOUTS!)
             // =========================================================================
-            Box(
-                modifier = Modifier
-                    .offset(x = slotWidth * livePagePosition)
-                    .width(slotWidth)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.24f),
-                                Color(0xFFA5C9FF).copy(alpha = 0.10f),
-                                Color.White.copy(alpha = 0.14f)
-                            )
-                        )
-                    )
-                    .border(
-                        width = 1.2.dp,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.68f),
-                                Color.White.copy(alpha = 0.12f),
-                                Color(0xFF93C5FD).copy(alpha = 0.45f)
-                            )
-                        ),
-                        shape = RoundedCornerShape(20.dp)
-                    )
-            ) {
-                // Specular Liquid Glass Top Rim Gleam
+            Row(modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 1.dp)
-                        .fillMaxWidth(0.55f)
-                        .height(1.5.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.White.copy(alpha = 0.55f))
-                )
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .graphicsLayer {
+                            val livePos = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+                                .coerceIn(0f, (tabCount - 1).toFloat())
+                            translationX = size.width * livePos
+                        }
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.24f),
+                                    Color(0xFFA5C9FF).copy(alpha = 0.10f),
+                                    Color.White.copy(alpha = 0.14f)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.2.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.68f),
+                                    Color.White.copy(alpha = 0.12f),
+                                    Color(0xFF93C5FD).copy(alpha = 0.45f)
+                                )
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 1.dp)
+                            .fillMaxWidth(0.55f)
+                            .height(1.5.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White.copy(alpha = 0.55f))
+                    )
+                }
+                Spacer(modifier = Modifier.weight((tabCount - 1).toFloat()))
             }
 
             Row(
@@ -749,30 +769,38 @@ private fun CredLiquidGlassBottomBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CredSlimDockItem(
-                    label = "HOME",
-                    selected = activeTab == CredDockTab.HOME,
-                    icon = if (activeTab == CredDockTab.HOME) Icons.Filled.Home else Icons.Outlined.Home,
+                    tab = CredDockTab.HOME,
+                    pagerState = pagerState,
+                    isLandscape = isLandscape,
+                    activeIcon = Icons.Filled.Home,
+                    inactiveIcon = Icons.Outlined.Home,
                     onClick = { onSelectTab(CredDockTab.HOME) },
                     modifier = Modifier.weight(1f)
                 )
                 CredSlimDockItem(
-                    label = "CARDS",
-                    selected = activeTab == CredDockTab.CARDS,
-                    icon = Icons.Outlined.CreditCard,
+                    tab = CredDockTab.CARDS,
+                    pagerState = pagerState,
+                    isLandscape = isLandscape,
+                    activeIcon = Icons.Outlined.CreditCard,
+                    inactiveIcon = Icons.Outlined.CreditCard,
                     onClick = { onSelectTab(CredDockTab.CARDS) },
                     modifier = Modifier.weight(1f)
                 )
                 CredSlimDockItem(
-                    label = "INSIGHTS",
-                    selected = activeTab == CredDockTab.INSIGHTS,
-                    icon = Icons.Outlined.Stars,
+                    tab = CredDockTab.INSIGHTS,
+                    pagerState = pagerState,
+                    isLandscape = isLandscape,
+                    activeIcon = Icons.Outlined.Stars,
+                    inactiveIcon = Icons.Outlined.Stars,
                     onClick = { onSelectTab(CredDockTab.INSIGHTS) },
                     modifier = Modifier.weight(1f)
                 )
                 CredSlimDockItem(
-                    label = "MORE",
-                    selected = activeTab == CredDockTab.MORE,
-                    icon = Icons.Outlined.GridView,
+                    tab = CredDockTab.MORE,
+                    pagerState = pagerState,
+                    isLandscape = isLandscape,
+                    activeIcon = Icons.Outlined.GridView,
+                    inactiveIcon = Icons.Outlined.GridView,
                     onClick = { onSelectTab(CredDockTab.MORE) },
                     modifier = Modifier.weight(1f)
                 )
@@ -781,37 +809,71 @@ private fun CredLiquidGlassBottomBar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CredSlimDockItem(
-    label: String,
-    selected: Boolean,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tab: CredDockTab,
+    pagerState: PagerState,
+    isLandscape: Boolean,
+    activeIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    inactiveIcon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = if (selected) Color.White else Color(0xFF8A91A0),
-            modifier = Modifier.size(21.dp)
-        )
-        Spacer(modifier = Modifier.height(3.dp))
-        Text(
-            text = label,
-            fontFamily = CredSansFontFamily,
-            fontSize = 9.5.sp,
-            fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
-            letterSpacing = 1.1.sp,
-            color = if (selected) Color.White else Color(0xFF828998)
-        )
+    val selected by remember(tab) {
+        derivedStateOf { pagerState.currentPage == tab.ordinal }
+    }
+
+    if (isLandscape) {
+        Row(
+            modifier = modifier
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(20.dp))
+                .clickable(onClick = onClick),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (selected) activeIcon else inactiveIcon,
+                contentDescription = tab.name,
+                tint = if (selected) Color.White else Color(0xFF8A91A0),
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = tab.name,
+                fontFamily = CredSansFontFamily,
+                fontSize = 10.sp,
+                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                letterSpacing = 1.1.sp,
+                color = if (selected) Color.White else Color(0xFF828998)
+            )
+        }
+    } else {
+        Column(
+            modifier = modifier
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(20.dp))
+                .clickable(onClick = onClick),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = if (selected) activeIcon else inactiveIcon,
+                contentDescription = tab.name,
+                tint = if (selected) Color.White else Color(0xFF8A91A0),
+                modifier = Modifier.size(21.dp)
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = tab.name,
+                fontFamily = CredSansFontFamily,
+                fontSize = 9.5.sp,
+                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                letterSpacing = 1.1.sp,
+                color = if (selected) Color.White else Color(0xFF828998)
+            )
+        }
     }
 }
 
@@ -821,6 +883,7 @@ private fun CredSlimDockItem(
 @Composable
 private fun CredHomeSheetContent(
     uiState: VaultUiState,
+    isLandscape: Boolean,
     listState: androidx.compose.foundation.lazy.LazyListState,
     searchFocusRequester: FocusRequester,
     hasSmsPermission: Boolean,
@@ -837,16 +900,14 @@ private fun CredHomeSheetContent(
     onTransactionClick: (TransactionEntity) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val groupedByDay = remember(uiState.filteredTransactions) {
-        uiState.filteredTransactions.groupBy { VaultFormatters.formatDayGroup(it.timestamp) }
-    }
+    val horizontalPad = if (isLandscape) 28.dp else 16.dp
 
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(VaultColors.CredWhite),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+        contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // 1. MONTHLY OUTFLOW HERO CARD (Uniform Sans-Serif Numbers, No Manual Train Button)
@@ -1315,8 +1376,8 @@ private fun CredHomeSheetContent(
             }
         }
 
-        // 4. TRANSACTIONS FEED
-        if (uiState.filteredTransactions.isEmpty()) {
+        // 4. TRANSACTIONS FEED (PRECOMPUTED OFF-THREAD IN VIEWMODEL FOR 120Hz/144Hz SMOOTHNESS)
+        if (uiState.dayGroups.isEmpty()) {
             item {
                 Box(
                     modifier = Modifier
@@ -1337,8 +1398,8 @@ private fun CredHomeSheetContent(
                 }
             }
         } else {
-            groupedByDay.forEach { (dayHeader, dayTxns) ->
-                item(key = "day_$dayHeader") {
+            uiState.dayGroups.forEach { group ->
+                item(key = "day_${group.dayHeader}", contentType = "day_header") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1347,22 +1408,13 @@ private fun CredHomeSheetContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = dayHeader,
+                            text = group.dayHeader,
                             style = MaterialTheme.typography.labelSmall,
                             color = VaultColors.InkMuted
                         )
-                        val dayDebitTotal = dayTxns
-                            .filter {
-                                it.type == TransactionType.DEBIT.name &&
-                                    !it.isSelfTransfer &&
-                                    it.category != SpendCategory.SELF_TRANSFER.name &&
-                                    it.category != SpendCategory.CREDIT_CARD_BILL.name &&
-                                    it.isIncludedInSpend
-                            }
-                            .sumOf { it.amount }
-                        if (dayDebitTotal > 0) {
+                        if (group.dayDebitTotal > 0) {
                             Text(
-                                text = "-${VaultFormatters.formatInr(dayDebitTotal)}",
+                                text = "-${VaultFormatters.formatInr(group.dayDebitTotal)}",
                                 fontFamily = CredSansFontFamily,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -1372,7 +1424,11 @@ private fun CredHomeSheetContent(
                     }
                 }
 
-                items(dayTxns, key = { it.id }) { txn ->
+                items(
+                    items = group.transactions,
+                    key = { it.id },
+                    contentType = { "txn_row" }
+                ) { txn ->
                     CredTransactionRowCard(
                         txn = txn,
                         onClick = { onTransactionClick(txn) }
@@ -1688,12 +1744,14 @@ private fun CredTransactionRowCard(
 @Composable
 private fun CardsUpiWalletsSheet(
     uiState: VaultUiState,
+    isLandscape: Boolean,
     selectedSubTabIndex: Int,
     onSelectSubTabIndex: (Int) -> Unit,
     onSelectAccount: (String) -> Unit,
     onSelectUpiApp: (String) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val horizontalPad = if (isLandscape) 28.dp else 16.dp
 
     Column(
         modifier = Modifier
@@ -1704,7 +1762,7 @@ private fun CardsUpiWalletsSheet(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = horizontalPad, vertical = 8.dp)
                 .clip(RoundedCornerShape(50))
                 .background(VaultColors.CredCanvasSubtle)
                 .border(1.dp, VaultColors.CredBorder, RoundedCornerShape(50))
@@ -1736,24 +1794,15 @@ private fun CardsUpiWalletsSheet(
             }
         }
 
-        AnimatedContent(
+        Crossfade(
             targetState = selectedSubTabIndex,
-            transitionSpec = {
-                val movingRight = targetState > initialState
-                if (movingRight) {
-                    (slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) { w -> w } + fadeIn(tween(180)))
-                        .togetherWith(slideOutHorizontally(tween(240, easing = FastOutSlowInEasing)) { w -> -w } + fadeOut(tween(150)))
-                } else {
-                    (slideInHorizontally(tween(240, easing = FastOutSlowInEasing)) { w -> -w } + fadeIn(tween(180)))
-                        .togetherWith(slideOutHorizontally(tween(240, easing = FastOutSlowInEasing)) { w -> w } + fadeOut(tween(150)))
-                }
-            },
-            label = "cardsSubTabSlide"
+            animationSpec = tween(160),
+            label = "cardsSubTabCrossfade"
         ) { subIdx ->
             val activeSub = InstrumentSubTab.entries[subIdx]
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 when (activeSub) {
@@ -2023,16 +2072,18 @@ private fun EmptyInstrumentNotice(message: String) {
 @Composable
 private fun CredInsightsSheet(
     uiState: VaultUiState,
+    isLandscape: Boolean,
     onShiftMonth: (Long) -> Unit,
     onJumpToCurrentMonth: () -> Unit,
     onSelectYearMonth: (String) -> Unit,
     onCategoryClick: (SpendCategory) -> Unit
 ) {
+    val horizontalPad = if (isLandscape) 28.dp else 16.dp
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(VaultColors.CredWhite),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -2274,12 +2325,15 @@ private fun CredInsightsSheet(
 private fun CredMoreAiRulesSheet(
     uiState: VaultUiState,
     isAmoledDark: Boolean,
+    isLandscape: Boolean,
+    refreshRateHz: Int,
     hasSecurityQuestionsSet: Boolean,
     onToggleAmoledTheme: () -> Unit,
     onRunSandbox: (String, String, Boolean) -> Unit,
     onResetPasscodeClick: () -> Unit,
     onEditSecurityQuestionsClick: () -> Unit
 ) {
+    val horizontalPad = if (isLandscape) 28.dp else 16.dp
     var senderDraft by remember { mutableStateOf("AD-HDFCBK") }
     var smsDraft by remember {
         mutableStateOf(
@@ -2291,10 +2345,10 @@ private fun CredMoreAiRulesSheet(
         modifier = Modifier
             .fillMaxSize()
             .background(VaultColors.CredWhite),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. APPEARANCE MODE CARD (AMOLED Black vs Light Mode)
+        // 1. APPEARANCE MODE CARD (AMOLED Black vs Light Mode + Live Display Refresh Rate)
         item {
             CredSurfaceCard(cornerRadius = 16.dp) {
                 Row(
@@ -2304,13 +2358,13 @@ private fun CredMoreAiRulesSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "display theme",
+                            text = "display & motion",
                             style = MaterialTheme.typography.titleLarge,
                             color = VaultColors.InkPrimary
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = if (isAmoledDark) "AMOLED Pitch-Black Mode active" else "Light Mode active",
+                            text = "${if (isAmoledDark) "AMOLED Pitch-Black" else "Light Mode"} • Adaptive ${refreshRateHz}Hz",
                             fontFamily = CredSansFontFamily,
                             fontSize = 12.sp,
                             color = VaultColors.InkSecondary

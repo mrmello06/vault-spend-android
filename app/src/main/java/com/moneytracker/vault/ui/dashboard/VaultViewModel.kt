@@ -1,6 +1,7 @@
 package com.moneytracker.vault.ui.dashboard
 
 import android.app.Application
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.moneytracker.vault.ai.IterativeLedgerAnalyzer
@@ -11,6 +12,7 @@ import com.moneytracker.vault.data.local.TransactionEntity
 import com.moneytracker.vault.data.local.VaultDatabase
 import com.moneytracker.vault.domain.model.AccountSpendSummary
 import com.moneytracker.vault.domain.model.CategoryBreakdown
+import com.moneytracker.vault.domain.model.DayTransactionGroup
 import com.moneytracker.vault.domain.model.MerchantSummary
 import com.moneytracker.vault.domain.model.MonthlyTrendPoint
 import com.moneytracker.vault.domain.model.PaymentRail
@@ -19,12 +21,15 @@ import com.moneytracker.vault.domain.model.TransactionType
 import com.moneytracker.vault.domain.model.UpiChannelSummary
 import com.moneytracker.vault.domain.model.WalletSummary
 import com.moneytracker.vault.sms.SmsInboxScanner
+import com.moneytracker.vault.ui.theme.VaultFormatters
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -42,6 +47,7 @@ enum class MoneyMatterFilter {
     SELF_TRANSFER
 }
 
+@Immutable
 data class VaultUiState(
     val selectedMonth: YearMonth = YearMonth.now(),
     val isCurrentMonthSelected: Boolean = true,
@@ -54,6 +60,7 @@ data class VaultUiState(
     val monthTransactionCount: Int = 0,
     val previousMonthDeltaPercent: Float? = null,
     val filteredTransactions: List<TransactionEntity> = emptyList(),
+    val dayGroups: List<DayTransactionGroup> = emptyList(),
     val totalAllTimeCount: Int = 0,
     val hasDemoTransactions: Boolean = false,
     val categoryBreakdowns: List<CategoryBreakdown> = emptyList(),
@@ -385,6 +392,24 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+        val dayGroups = filtered
+            .groupBy { VaultFormatters.formatDayGroup(it.timestamp) }
+            .map { (header, list) ->
+                val dayDebit = list
+                    .filter {
+                        it.type == TransactionType.DEBIT.name &&
+                            !it.isSelfTransferEntry() &&
+                            !it.isCardBillSettlement() &&
+                            it.isIncludedInSpend
+                    }
+                    .sumOf { it.amount }
+                DayTransactionGroup(
+                    dayHeader = header,
+                    dayDebitTotal = dayDebit,
+                    transactions = list
+                )
+            }
+
         val aiSuggestions = buildDynamicAiSearchSuggestions(allTxns, aux.suggestionSeed)
 
         VaultUiState(
@@ -399,6 +424,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             monthTransactionCount = monthTxns.size,
             previousMonthDeltaPercent = momDelta,
             filteredTransactions = filtered,
+            dayGroups = dayGroups,
             totalAllTimeCount = allTxns.size,
             hasDemoTransactions = allTxns.any { it.senderAddress.startsWith("DEMO-") },
             categoryBreakdowns = catBreakdowns,
@@ -422,7 +448,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             undoSecondsRemaining = aux.undoSecondsRemaining,
             sandboxResult = aux.sandboxResult
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = VaultUiState(
