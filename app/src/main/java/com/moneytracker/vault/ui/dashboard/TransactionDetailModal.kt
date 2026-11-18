@@ -1,23 +1,27 @@
 package com.moneytracker.vault.ui.dashboard
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.CompareArrows
 import androidx.compose.material.icons.automirrored.outlined.Notes
@@ -46,12 +50,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +79,7 @@ import com.moneytracker.vault.ui.theme.CredSansFontFamily
 import com.moneytracker.vault.ui.theme.VaultColors
 import com.moneytracker.vault.ui.theme.VaultFormatters
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -143,6 +153,52 @@ fun TransactionDetailModal(
         else -> VaultColors.DebitRed
     }
 
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var isDismissing by remember { mutableStateOf(false) }
+
+    fun animateDismiss(afterDismiss: () -> Unit = onDismiss) {
+        if (isDismissing) return
+        isDismissing = true
+        if (hasAnyDirtyChange()) {
+            onAutoSaveEdits(
+                merchantNameDraft,
+                selectedCategory,
+                noteDraft,
+                includeInSpend,
+                teachAllMatching
+            )
+        }
+        scope.launch {
+            sheetState.hide()
+        }.invokeOnCompletion {
+            if (!sheetState.isVisible) {
+                afterDismiss()
+            }
+        }
+    }
+
+    BackHandler {
+        animateDismiss()
+    }
+
+    // Intercept downward drag when list is not at top so user can scroll back up smoothly!
+    val nestedScrollConnection = remember(listState) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                return if (available.y > 0f && listState.canScrollBackward) {
+                    available
+                } else {
+                    Offset.Zero
+                }
+            }
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = {
             // ONLY save if the user actually modified something (viewing alone never locks isUserModified = 1!)
@@ -158,9 +214,20 @@ fun TransactionDetailModal(
             onDismiss()
         },
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 0.dp, bottomEnd = 0.dp),
+        windowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = VaultColors.CardSurface,
-        contentColor = VaultColors.InkPrimary
+        contentColor = VaultColors.InkPrimary,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .width(42.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(VaultColors.CredBorderStrong)
+            )
+        }
     ) {
         Column(
             modifier = Modifier
@@ -238,7 +305,7 @@ fun TransactionDetailModal(
                     }
 
                     IconButton(
-                        onClick = onDelete,
+                        onClick = { animateDismiss(onDelete) },
                         modifier = Modifier.size(38.dp)
                     ) {
                         Icon(
@@ -250,18 +317,7 @@ fun TransactionDetailModal(
                     }
 
                     IconButton(
-                        onClick = {
-                            if (hasAnyDirtyChange()) {
-                                onAutoSaveEdits(
-                                    merchantNameDraft,
-                                    selectedCategory,
-                                    noteDraft,
-                                    includeInSpend,
-                                    teachAllMatching
-                                )
-                            }
-                            onDismiss()
-                        },
+                        onClick = { animateDismiss() },
                         modifier = Modifier.size(38.dp)
                     ) {
                         Icon(
@@ -276,290 +332,309 @@ fun TransactionDetailModal(
 
             HorizontalDivider(color = VaultColors.CredBorder, thickness = 1.dp)
 
-            Column(
+            LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .nestedScroll(nestedScrollConnection),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                when {
-                    isSelf -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(VaultColors.SelfYellowBg)
-                                .border(1.dp, VaultColors.SelfYellowBorder, RoundedCornerShape(14.dp))
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.CompareArrows,
-                                contentDescription = null,
-                                tint = VaultColors.SelfYellowText,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Self transfer between your accounts — automatically excluded from monthly spend & credit totals.",
-                                fontFamily = CredSansFontFamily,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = VaultColors.SelfYellowText
-                            )
-                        }
-                    }
-
-                    isCardBill -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(VaultColors.CardBillBg)
-                                .border(1.dp, VaultColors.CardBillBlue.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.CreditScore,
-                                contentDescription = null,
-                                tint = VaultColors.CardBillBlue,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Credit card bill payment (e.g. CRED Club) — tracked separately so individual card purchases aren't counted twice.",
-                                fontFamily = CredSansFontFamily,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = VaultColors.CardBillBlue
-                            )
-                        }
-                    }
-
-                    else -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    if (includeInSpend) VaultColors.CredCanvasSubtle else VaultColors.BlackedOutCard
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = if (includeInSpend) VaultColors.CredBorderStrong else VaultColors.BlackedOutCard,
-                                    shape = RoundedCornerShape(14.dp)
-                                )
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    val next = !includeInSpend
-                                    includeInSpend = next
-                                    pushAutoSaveNow(included = next)
-                                }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                // 1. Spend Inclusion / Transfer Type Banner
+                item {
+                    when {
+                        isSelf -> {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(VaultColors.SelfYellowBg)
+                                    .border(1.dp, VaultColors.SelfYellowBorder, RoundedCornerShape(14.dp))
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = if (includeInSpend) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                                    imageVector = Icons.AutoMirrored.Outlined.CompareArrows,
                                     contentDescription = null,
-                                    tint = if (includeInSpend) VaultColors.InkPrimary else Color.White,
-                                    modifier = Modifier.size(20.dp)
+                                    tint = VaultColors.SelfYellowText,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = if (includeInSpend) "counted in total spends" else "excluded from total spends",
-                                        fontFamily = CredSansFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = if (includeInSpend) VaultColors.InkPrimary else Color.White
-                                    )
-                                    Text(
-                                        text = if (includeInSpend) "toggle off to black out & exclude from totals"
-                                        else "blacked out in list & excluded from monthly math",
-                                        fontFamily = CredSansFontFamily,
-                                        fontSize = 11.sp,
-                                        color = if (includeInSpend) VaultColors.InkSecondary else Color(0xFF9CA3AF)
-                                    )
-                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Self transfer between your accounts — automatically excluded from monthly spend & credit totals.",
+                                    fontFamily = CredSansFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = VaultColors.SelfYellowText
+                                )
                             }
+                        }
 
-                            Switch(
-                                checked = includeInSpend,
-                                onCheckedChange = { next ->
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    includeInSpend = next
-                                    pushAutoSaveNow(included = next)
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = VaultColors.OnInkPrimary,
-                                    checkedTrackColor = VaultColors.InkPrimary,
-                                    uncheckedThumbColor = Color.White,
-                                    uncheckedTrackColor = Color(0xFF4B5563)
+                        isCardBill -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(VaultColors.CardBillBg)
+                                    .border(1.dp, VaultColors.CardBillBlue.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CreditScore,
+                                    contentDescription = null,
+                                    tint = VaultColors.CardBillBlue,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                            )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Credit card bill payment (e.g. CRED Club) — tracked separately so individual card purchases aren't counted twice.",
+                                    fontFamily = CredSansFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = VaultColors.CardBillBlue
+                                )
+                            }
+                        }
+
+                        else -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        if (includeInSpend) VaultColors.CredCanvasSubtle else VaultColors.BlackedOutCard
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (includeInSpend) VaultColors.CredBorderStrong else VaultColors.BlackedOutCard,
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        val next = !includeInSpend
+                                        includeInSpend = next
+                                        pushAutoSaveNow(included = next)
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = if (includeInSpend) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                                        contentDescription = null,
+                                        tint = if (includeInSpend) VaultColors.InkPrimary else Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            text = if (includeInSpend) "counted in total spends" else "excluded from total spends",
+                                            fontFamily = CredSansFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = if (includeInSpend) VaultColors.InkPrimary else Color.White
+                                        )
+                                        Text(
+                                            text = if (includeInSpend) "toggle off to black out & exclude from totals"
+                                            else "blacked out in list & excluded from monthly math",
+                                            fontFamily = CredSansFontFamily,
+                                            fontSize = 11.sp,
+                                            color = if (includeInSpend) VaultColors.InkSecondary else Color(0xFF9CA3AF)
+                                        )
+                                    }
+                                }
+
+                                Switch(
+                                    checked = includeInSpend,
+                                    onCheckedChange = { next ->
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        includeInSpend = next
+                                        pushAutoSaveNow(included = next)
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = VaultColors.OnInkPrimary,
+                                        checkedTrackColor = VaultColors.InkPrimary,
+                                        uncheckedThumbColor = Color.White,
+                                        uncheckedTrackColor = Color(0xFF4B5563)
+                                    )
+                                )
+                            }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                // 2. Personal Note
+                item {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.Notes,
+                                contentDescription = null,
+                                tint = VaultColors.InkSecondary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "PERSONAL NOTE",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = VaultColors.InkSecondary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.Notes,
-                        contentDescription = null,
-                        tint = VaultColors.InkSecondary,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "PERSONAL NOTE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = VaultColors.InkSecondary
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = noteDraft,
-                    onValueChange = { noteDraft = it },
-                    placeholder = {
-                        Text(
-                            "Add a personal note...",
-                            fontFamily = CredSansFontFamily,
-                            fontSize = 13.sp,
-                            color = VaultColors.InkMuted
-                        )
-                    },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = VaultColors.InkPrimary,
-                        unfocusedBorderColor = VaultColors.CredBorderStrong,
-                        focusedTextColor = VaultColors.InkPrimary,
-                        unfocusedTextColor = VaultColors.InkPrimary,
-                        focusedContainerColor = VaultColors.CredCanvasSubtle,
-                        unfocusedContainerColor = VaultColors.CredCanvasSubtle
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "MERCHANT / PAYEE NAME",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = VaultColors.InkSecondary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = merchantNameDraft,
-                    onValueChange = { merchantNameDraft = it },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = VaultColors.InkPrimary,
-                        unfocusedBorderColor = VaultColors.CredBorderStrong,
-                        focusedTextColor = VaultColors.InkPrimary,
-                        unfocusedTextColor = VaultColors.InkPrimary,
-                        focusedContainerColor = VaultColors.CredCanvasSubtle,
-                        unfocusedContainerColor = VaultColors.CredCanvasSubtle
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                Text(
-                    text = "CATEGORY",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = VaultColors.InkSecondary
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SpendCategory.entries.forEach { cat ->
-                        CredExplorePill(
-                            label = cat.displayName,
-                            icon = cat.iconVector(),
-                            accentColor = if (cat == SpendCategory.SELF_TRANSFER) VaultColors.SelfYellowText else Color(cat.colorHex),
-                            selected = cat == selectedCategory,
-                            onClick = {
-                                selectedCategory = cat
-                                pushAutoSaveNow(cat = cat)
-                            }
+                        OutlinedTextField(
+                            value = noteDraft,
+                            onValueChange = { noteDraft = it },
+                            placeholder = {
+                                Text(
+                                    "Add a personal note...",
+                                    fontFamily = CredSansFontFamily,
+                                    fontSize = 13.sp,
+                                    color = VaultColors.InkMuted
+                                )
+                            },
+                            minLines = 2,
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = VaultColors.InkPrimary,
+                                unfocusedBorderColor = VaultColors.CredBorderStrong,
+                                focusedTextColor = VaultColors.InkPrimary,
+                                unfocusedTextColor = VaultColors.InkPrimary,
+                                focusedContainerColor = VaultColors.CredCanvasSubtle,
+                                unfocusedContainerColor = VaultColors.CredCanvasSubtle
+                            )
                         )
                     }
                 }
 
+                // 3. Merchant / Payee Name
+                item {
+                    Column {
+                        Text(
+                            text = "MERCHANT / PAYEE NAME",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VaultColors.InkSecondary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = merchantNameDraft,
+                            onValueChange = { merchantNameDraft = it },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = VaultColors.InkPrimary,
+                                unfocusedBorderColor = VaultColors.CredBorderStrong,
+                                focusedTextColor = VaultColors.InkPrimary,
+                                unfocusedTextColor = VaultColors.InkPrimary,
+                                focusedContainerColor = VaultColors.CredCanvasSubtle,
+                                unfocusedContainerColor = VaultColors.CredCanvasSubtle
+                            )
+                        )
+                    }
+                }
+
+                // 4. Category Selector FlowRow
+                item {
+                    Column {
+                        Text(
+                            text = "CATEGORY",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VaultColors.InkSecondary
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SpendCategory.entries.forEach { cat ->
+                                CredExplorePill(
+                                    label = cat.displayName,
+                                    icon = cat.iconVector(),
+                                    accentColor = if (cat == SpendCategory.SELF_TRANSFER) VaultColors.SelfYellowText else Color(cat.colorHex),
+                                    selected = cat == selectedCategory,
+                                    onClick = {
+                                        selectedCategory = cat
+                                        pushAutoSaveNow(cat = cat)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 5. Remember Matching Rule Checkbox
                 if (transaction.merchantRawCode.length >= 3 &&
                     transaction.merchantRawCode !in setOf("UPI", "CARD", "BANK", "WALLET")
                 ) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { teachAllMatching = !teachAllMatching }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = teachAllMatching,
-                            onCheckedChange = { teachAllMatching = it },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = VaultColors.InkPrimary,
-                                checkmarkColor = VaultColors.OnInkPrimary
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { teachAllMatching = !teachAllMatching }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = teachAllMatching,
+                                onCheckedChange = { teachAllMatching = it },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = VaultColors.InkPrimary,
+                                    checkmarkColor = VaultColors.OnInkPrimary
+                                )
                             )
-                        )
+                            Text(
+                                text = "remember for all '${transaction.merchantRawCode}' messages",
+                                fontFamily = CredSansFontFamily,
+                                fontSize = 13.sp,
+                                color = VaultColors.InkPrimary
+                            )
+                        }
+                    }
+                }
+
+                // 6. SMS & Payment Details Card
+                item {
+                    CredSurfaceCard(backgroundColor = VaultColors.CredCanvasSubtle) {
                         Text(
-                            text = "remember for all '${transaction.merchantRawCode}' messages",
+                            text = "SMS & PAYMENT DETAILS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VaultColors.InkSecondary
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        DetailRow("SELLER CODE", transaction.merchantRawCode, mono = true)
+                        DetailRow(
+                            "INSTRUMENT",
+                            buildString {
+                                append(transaction.bankName)
+                                if (transaction.accountLast4 != "0000") append(" ••${transaction.accountLast4}")
+                                append(" • ")
+                                append(if (transaction.upiApp.isNotBlank()) transaction.upiApp else rail.label)
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = transaction.fullSmsBody.ifBlank { transaction.sanitizedPreview },
                             fontFamily = CredSansFontFamily,
-                            fontSize = 13.sp,
-                            color = VaultColors.InkPrimary
+                            fontSize = 12.sp,
+                            color = VaultColors.InkSecondary
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                CredSurfaceCard(backgroundColor = VaultColors.CredCanvasSubtle) {
-                    Text(
-                        text = "SMS & PAYMENT DETAILS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = VaultColors.InkSecondary
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    DetailRow("SELLER CODE", transaction.merchantRawCode, mono = true)
-                    DetailRow(
-                        "INSTRUMENT",
-                        buildString {
-                            append(transaction.bankName)
-                            if (transaction.accountLast4 != "0000") append(" ••${transaction.accountLast4}")
-                            append(" • ")
-                            append(if (transaction.upiApp.isNotBlank()) transaction.upiApp else rail.label)
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = transaction.fullSmsBody.ifBlank { transaction.sanitizedPreview },
-                        fontFamily = CredSansFontFamily,
-                        fontSize = 12.sp,
-                        color = VaultColors.InkSecondary
-                    )
+                item {
+                    Spacer(modifier = Modifier.height(28.dp))
                 }
-
-                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }

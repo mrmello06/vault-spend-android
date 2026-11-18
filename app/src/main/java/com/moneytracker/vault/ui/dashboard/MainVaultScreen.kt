@@ -94,12 +94,16 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.SpanStyle
@@ -2435,6 +2439,43 @@ private fun CredProfileModalSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var isDismissing by remember { mutableStateOf(false) }
+
+    fun animateDismiss(afterDismiss: () -> Unit = onDismiss) {
+        if (isDismissing) return
+        isDismissing = true
+        scope.launch {
+            sheetState.hide()
+        }.invokeOnCompletion {
+            if (!sheetState.isVisible) {
+                afterDismiss()
+            }
+        }
+    }
+
+    BackHandler {
+        animateDismiss()
+    }
+
+    // Intercept downward drag when list is not at top so user can scroll back up smoothly!
+    val nestedScrollConnection = remember(listState) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                return if (available.y > 0f && listState.canScrollBackward) {
+                    available
+                } else {
+                    Offset.Zero
+                }
+            }
+        }
+    }
+
     var senderDraft by remember { mutableStateOf("AD-HDFCBK") }
     var smsDraft by remember {
         mutableStateOf(
@@ -2461,8 +2502,10 @@ private fun CredProfileModalSheet(
         }
     ) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxWidth()
+                .nestedScroll(nestedScrollConnection)
                 .navigationBarsPadding(),
             contentPadding = PaddingValues(horizontal = if (isLandscape) 28.dp else 18.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -2506,7 +2549,7 @@ private fun CredProfileModalSheet(
                             color = VaultColors.CreditGreen
                         )
                     }
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = { animateDismiss() }) {
                         Icon(
                             imageVector = Icons.Outlined.Close,
                             contentDescription = "Close",
@@ -2577,7 +2620,7 @@ private fun CredProfileModalSheet(
 
                         CredPrimaryPillButton(
                             label = "lock app now",
-                            onClick = onLockVaultNow
+                            onClick = { animateDismiss(onLockVaultNow) }
                         )
                     }
 
@@ -2586,12 +2629,12 @@ private fun CredProfileModalSheet(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         CredSecondaryPillButton(
                             label = "change passcode",
-                            onClick = onResetPasscodeClick,
+                            onClick = { animateDismiss(onResetPasscodeClick) },
                             modifier = Modifier.weight(1f)
                         )
                         CredSecondaryPillButton(
                             label = if (hasSecurityQuestionsSet) "3 questions ✓" else "setup questions",
-                            onClick = onEditSecurityQuestionsClick,
+                            onClick = { animateDismiss(onEditSecurityQuestionsClick) },
                             modifier = Modifier.weight(1f)
                         )
                     }
