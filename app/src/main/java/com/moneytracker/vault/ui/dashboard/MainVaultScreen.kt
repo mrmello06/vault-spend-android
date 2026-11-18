@@ -41,6 +41,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
@@ -78,6 +80,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -109,11 +112,17 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -932,7 +941,26 @@ private fun CredHomeSheetContent(
     onTransactionClick: (TransactionEntity) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val horizontalPad = if (isLandscape) 28.dp else 16.dp
+
+    var searchTextFieldValue by remember {
+        mutableStateOf(
+            TextFieldValue(
+                text = uiState.searchQuery,
+                selection = TextRange(uiState.searchQuery.length)
+            )
+        )
+    }
+
+    LaunchedEffect(uiState.searchQuery) {
+        if (uiState.searchQuery != searchTextFieldValue.text) {
+            searchTextFieldValue = TextFieldValue(
+                text = uiState.searchQuery,
+                selection = TextRange(uiState.searchQuery.length)
+            )
+        }
+    }
 
     LazyColumn(
         state = listState,
@@ -1240,7 +1268,7 @@ private fun CredHomeSheetContent(
                         modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.CenterStart
                     ) {
-                        if (uiState.searchQuery.isEmpty()) {
+                        if (searchTextFieldValue.text.isEmpty()) {
                             Text(
                                 text = buildAnnotatedString {
                                     withStyle(
@@ -1268,9 +1296,25 @@ private fun CredHomeSheetContent(
                             )
                         }
                         BasicTextField(
-                            value = uiState.searchQuery,
-                            onValueChange = onSearchQueryChange,
+                            value = searchTextFieldValue,
+                            onValueChange = { newValue ->
+                                searchTextFieldValue = newValue
+                                if (newValue.text != uiState.searchQuery) {
+                                    onSearchQueryChange(newValue.text)
+                                }
+                            },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.None,
+                                autoCorrect = false,
+                                keyboardType = KeyboardType.Text,
+                                imeAction = ImeAction.Search
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onSearch = {
+                                    keyboardController?.hide()
+                                }
+                            ),
                             textStyle = TextStyle(
                                 fontFamily = CredSansFontFamily,
                                 fontWeight = FontWeight.SemiBold,
@@ -1283,14 +1327,17 @@ private fun CredHomeSheetContent(
                                 .focusRequester(searchFocusRequester)
                         )
                     }
-                    if (uiState.searchQuery.isNotEmpty()) {
+                    if (searchTextFieldValue.text.isNotEmpty()) {
                         Icon(
                             imageVector = Icons.Outlined.Close,
                             contentDescription = "Clear search",
                             tint = VaultColors.InkSecondary,
                             modifier = Modifier
                                 .size(18.dp)
-                                .clickable { onSearchQueryChange("") }
+                                .clickable {
+                                    searchTextFieldValue = TextFieldValue("")
+                                    onSearchQueryChange("")
+                                }
                         )
                     }
                 }
