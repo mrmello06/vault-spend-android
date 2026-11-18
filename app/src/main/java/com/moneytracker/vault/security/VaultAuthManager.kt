@@ -17,6 +17,7 @@ class VaultAuthManager(private val context: Context) {
         private const val KEY_SALT = "pin_salt_b64"
         private const val KEY_HASH = "pin_hash_b64"
         private const val KEY_BIOMETRIC_ENABLED = "biometric_enabled"
+        private const val KEY_APP_LOCK_ENABLED = "app_lock_enabled"
 
         private const val KEY_SEC_Q_SALT = "sec_q_salt_b64"
         private const val KEY_SEC_A1_HASH = "sec_a1_hash_b64"
@@ -34,6 +35,15 @@ class VaultAuthManager(private val context: Context) {
 
     fun isPasscodeConfigured(): Boolean {
         return !prefs.getString(KEY_HASH, null).isNullOrBlank()
+    }
+
+    fun isAppLockEnabled(): Boolean {
+        if (!isPasscodeConfigured()) return false
+        return prefs.getBoolean(KEY_APP_LOCK_ENABLED, true)
+    }
+
+    fun setAppLockEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_APP_LOCK_ENABLED, enabled).apply()
     }
 
     fun hasSecurityQuestionsConfigured(): Boolean {
@@ -60,6 +70,7 @@ class VaultAuthManager(private val context: Context) {
             .putString(KEY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
             .putString(KEY_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
             .putBoolean(KEY_BIOMETRIC_ENABLED, true)
+            .putBoolean(KEY_APP_LOCK_ENABLED, true)
             .apply()
     }
 

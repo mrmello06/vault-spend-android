@@ -5,6 +5,9 @@ import com.moneytracker.vault.data.local.VaultDao
 import com.moneytracker.vault.domain.model.PaymentRail
 import com.moneytracker.vault.domain.model.SpendCategory
 import com.moneytracker.vault.domain.model.TransactionType
+import java.time.Instant
+import java.time.YearMonth
+import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
 
@@ -39,11 +42,13 @@ object IterativeLedgerAnalyzer {
         "IRCTC", "BMTC", "NETFLIX", "SPOTIFY", "APPLE", "SAMSUNG", "PAYZAPP",
         "MOBIKWIK", "FREECHARGE", "GROWW", "ZERODHA", "UPSTOX", "HDFC", "ICICI",
         "AXIS", "KOTAK", "SBI", "PNB", "BANK", "CARD", "CREDIT", "DEBIT", "WALLET",
-        "UPI", "TRANSFER", "PAYMENT", "MERCHANT", "STORE", "SHOP", "BILL", "LOAN", "EMI"
+        "UPI", "TRANSFER", "PAYMENT", "MERCHANT", "STORE", "SHOP", "BILL", "LOAN", "EMI",
+        "SALARY", "PAYROLL", "STIPEND"
     )
 
-    // Categories that represent real purchases or Credit Card Bills and must NEVER be overwritten to SELF_TRANSFER
+    // Categories that represent real purchases, Salary, or Credit Card Bills and must NEVER be overwritten to SELF_TRANSFER
     private val protectedNonSelfCategories = setOf(
+        SpendCategory.SALARY.name,
         SpendCategory.CREDIT_CARD_BILL.name,
         SpendCategory.FOOD_DINING.name,
         SpendCategory.GROCERIES.name,
@@ -253,6 +258,8 @@ object IterativeLedgerAnalyzer {
 
         for (rawUpper in unresolvedCodes) {
             val resolved = highConfidenceByCode[rawUpper] ?: continue
+            // Never blindly copy SALARY onto small debits; only copy SALARY onto genuine CREDIT rows
+            if (resolved.category == SpendCategory.SALARY.name) continue
             dao.propagateCrossLearnedMerchant(
                 rawCode = rawUpper,
                 resolvedName = resolved.merchantDisplayName,
@@ -261,7 +268,115 @@ object IterativeLedgerAnalyzer {
             updatesInPass++
         }
 
+        // 4. Multi-Month Corporate Payroll & Salary Convergence Pass (Zero Random Guessing!)
+        updatesInPass += refineCorporateSalaryCredits(all, dao)
+
         return updatesInPass
+    }
+
+    private val corporatePayrollEntityRegex = Regex(
+        """\b(?:PVT\.?\s*LTD|PRIVATE\s+LIMITED|LIMITED|LTD|LLP|INC|CORP|CORPORATION|TECHNOLOGIES|TECHNOLOGY|SOLUTIONS|SYSTEMS|SERVICES|INFOTECH|CONSULTANCY|CONSULTING|GLOBAL)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val salaryDisqualifierRegex = Regex(
+        """\b(?:refund|cashback|reversal|dividend|div\s+cr|interest|int\.?\s+pd|mutual\s+fund|redemption|ncl|iccl|cams|kfintech|zerodha|groww|upstox|claim|insurance|loan|disburs)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private suspend fun refineCorporateSalaryCredits(
+        all: List<TransactionEntity>,
+        dao: VaultDao
+    ): Int {
+        var updates = 0
+        val zone = ZoneId.systemDefault()
+
+        // 4A. Propagate confirmed corporate Salary employers to other monthly bank-transfer credits from the same employer
+        val confirmedSalaryEmployerNames = all
+            .filter {
+                it.type == TransactionType.CREDIT.name &&
+                    it.category == SpendCategory.SALARY.name &&
+                    !it.isSelfTransfer &&
+                    !it.merchantDisplayName.equals("Salary Credit", ignoreCase = true) &&
+                    it.merchantDisplayName.length >= 4
+            }
+            .map { it.merchantDisplayName.uppercase(Locale.US) }
+            .toSet()
+
+        if (confirmedSalaryEmployerNames.isNotEmpty()) {
+            for (txn in all) {
+                if (txn.isUserModified ||
+                    txn.isSelfTransfer ||
+                    txn.type != TransactionType.CREDIT.name ||
+                    txn.category == SpendCategory.SALARY.name ||
+                    txn.paymentRail == PaymentRail.UPI.name ||
+                    txn.amount < 5000.0 ||
+                    salaryDisqualifierRegex.containsMatchIn(txn.fullSmsBody)
+                ) continue
+
+                if (txn.merchantDisplayName.uppercase(Locale.US) in confirmedSalaryEmployerNames) {
+                    dao.updateSingleTransactionFull(
+                        transactionId = txn.id,
+                        displayName = txn.merchantDisplayName,
+                        category = SpendCategory.SALARY.name,
+                        note = txn.note,
+                        isIncludedInSpend = txn.isIncludedInSpend,
+                        isSelfTransfer = false
+                    )
+                    dao.resetUserModifiedFlag(txn.id)
+                    updates++
+                }
+            }
+        }
+
+        // 4B. Strict Multi-Month Corporate Payroll Recurrence (when NEFT/ACH omits literal "SALARY" word)
+        // Non-salaried users (random UPI / irregular P2P transfers) will NEVER match these 5 strict corporate criteria!
+        val candidateBankCredits = all.filter { txn ->
+            !txn.isUserModified &&
+                !txn.isSelfTransfer &&
+                txn.type == TransactionType.CREDIT.name &&
+                txn.category in setOf(SpendCategory.OTHERS.name, SpendCategory.TRANSFERS.name) &&
+                txn.paymentRail == PaymentRail.BANK_TRANSFER.name &&
+                txn.amount >= 10000.0 &&
+                corporatePayrollEntityRegex.containsMatchIn(txn.fullSmsBody) &&
+                !salaryDisqualifierRegex.containsMatchIn(txn.fullSmsBody) &&
+                txn.merchantDisplayName.length >= 4
+        }
+
+        val groupedByEmployer = candidateBankCredits.groupBy { it.merchantDisplayName.uppercase(Locale.US) }
+        for ((_, credits) in groupedByEmployer) {
+            val distinctMonths = credits.map {
+                YearMonth.from(Instant.ofEpochMilli(it.timestamp).atZone(zone))
+            }.toSet()
+
+            if (distinctMonths.size < 2) continue
+            if (credits.size > distinctMonths.size * 2) continue
+
+            val minAmt = credits.minOf { it.amount }
+            val maxAmt = credits.maxOf { it.amount }
+            if (minAmt < maxAmt * 0.60) continue
+
+            val paydayCount = credits.count { txn ->
+                val dom = Instant.ofEpochMilli(txn.timestamp).atZone(zone).dayOfMonth
+                dom in 24..31 || dom in 1..10
+            }
+            if (paydayCount.toDouble() / credits.size < 0.70) continue
+
+            for (txn in credits) {
+                dao.updateSingleTransactionFull(
+                    transactionId = txn.id,
+                    displayName = txn.merchantDisplayName,
+                    category = SpendCategory.SALARY.name,
+                    note = txn.note,
+                    isIncludedInSpend = txn.isIncludedInSpend,
+                    isSelfTransfer = false
+                )
+                dao.resetUserModifiedFlag(txn.id)
+                updates++
+            }
+        }
+
+        return updates
     }
 
     private fun extractStrictHumanName(displayName: String): String? {

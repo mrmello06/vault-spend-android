@@ -55,6 +55,11 @@ enum class SpendCategory(
         subtitle = "Courses, Books, Exams & Learning Platforms",
         colorHex = 0xFF2DD4BF
     ),
+    SALARY(
+        displayName = "Salary",
+        subtitle = "Monthly Payroll, Salary & Stipend Credits",
+        colorHex = 0xFF00E676
+    ),
     CREDIT_CARD_BILL(
         displayName = "Card Bill",
         subtitle = "CRED Club, Kiwi & Credit Card Bill Payments",

@@ -123,4 +123,51 @@ class OfflineExpenseAiEngineTest {
         assertEquals("Office Cafeteria", txn.merchantDisplayName)
         assertEquals(SpendCategory.FOOD_DINING.name, txn.category)
     }
+
+    @Test
+    fun `accurately identifies corporate salary credits across HDFC, ICICI, SBI, and Axis without catching casual credits`() {
+        val hdfcSalary = "A/c XX4821 credited with Rs 65,000.00 on 31-Oct-26 by NEFT-ACMETECH-SALARY FOR OCT. Ref: HDFCN12345. Avl Bal: Rs 1,12,450.50."
+        val iciciSalary = "Acct XX5678 credited with INR 75,400.00 on 31-OCT-26 towards NEFT-SALARY FROM GOOGLE INDIA PVT LTD. Avl Bal: INR 90,210.00."
+        val sbiSalary = "A/c Lok-XXXXXX12345 credited by Rs.50,000.00 on 31-Oct-26 trf from BULK POSTING-BY SALARY-INFOSYS. Avl Bal Rs 65,200.00."
+        val axisSalary = "INR 82,000.00 credited to A/c no. XX9876 on 31-Oct-26 through NEFT-SALARY. Ref: UTIBN881122. Avl Bal: INR 1,05,300.00."
+
+        val outHdfc = OfflineExpenseAiEngine.parseSms("AD-HDFCBK-S", hdfcSalary, 101L)
+        assertTrue(outHdfc is OfflineExpenseAiEngine.AiParseOutcome.Parsed)
+        val tHdfc = (outHdfc as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertEquals(SpendCategory.SALARY.name, tHdfc.category)
+        assertEquals(TransactionType.CREDIT.name, tHdfc.type)
+        assertEquals(65000.0, tHdfc.amount, 0.001)
+
+        val outIcici = OfflineExpenseAiEngine.parseSms("BP-ICICIT-S", iciciSalary, 102L)
+        assertTrue(outIcici is OfflineExpenseAiEngine.AiParseOutcome.Parsed)
+        val tIcici = (outIcici as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertEquals(SpendCategory.SALARY.name, tIcici.category)
+        assertEquals(75400.0, tIcici.amount, 0.001)
+
+        val outSbi = OfflineExpenseAiEngine.parseSms("SB-SBIINB-S", sbiSalary, 103L)
+        assertTrue(outSbi is OfflineExpenseAiEngine.AiParseOutcome.Parsed)
+        val tSbi = (outSbi as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertEquals(SpendCategory.SALARY.name, tSbi.category)
+        assertEquals(50000.0, tSbi.amount, 0.001)
+
+        val outAxis = OfflineExpenseAiEngine.parseSms("AD-AXISBK-S", axisSalary, 104L)
+        assertTrue(outAxis is OfflineExpenseAiEngine.AiParseOutcome.Parsed)
+        val tAxis = (outAxis as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertEquals(SpendCategory.SALARY.name, tAxis.category)
+        assertEquals(82000.0, tAxis.amount, 0.001)
+
+        // Ensure non-salary credits are NOT categorized as SALARY
+        val casualP2p = "Credit Alert! Rs.5000.00 credited to HDFC Bank A/c XX4821 on 15-11-26 from VPA friend@okaxis (UPI 664083728809)"
+        val dividend = "Rs. 4,500.00 credited to A/c XX4821 on 10-11-26 by ACH C-DIVIDEND TCS LTD."
+        val refund = "Rs. 1,299.00 credited to A/c XX4821 on 10-11-26 transfer from AMAZON PAY Ref 123456"
+
+        val tP2p = (OfflineExpenseAiEngine.parseSms("AD-HDFCBK-S", casualP2p, 105L) as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertFalse(tP2p.category == SpendCategory.SALARY.name)
+
+        val tDiv = (OfflineExpenseAiEngine.parseSms("AD-HDFCBK-S", dividend, 106L) as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertFalse(tDiv.category == SpendCategory.SALARY.name)
+
+        val tRef = (OfflineExpenseAiEngine.parseSms("AD-HDFCBK-S", refund, 107L) as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertFalse(tRef.category == SpendCategory.SALARY.name)
+    }
 }

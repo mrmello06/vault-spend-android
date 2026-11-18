@@ -64,12 +64,18 @@ import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Stars
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -126,8 +132,7 @@ import kotlinx.coroutines.launch
 private enum class CredDockTab {
     HOME,
     CARDS,
-    INSIGHTS,
-    MORE
+    INSIGHTS
 }
 
 private enum class InstrumentSubTab(val label: String) {
@@ -144,6 +149,8 @@ fun MainVaultScreen(
     hasSecurityQuestionsSet: Boolean,
     isAmoledDark: Boolean,
     refreshRateHz: Int = 60,
+    isAppLockEnabled: Boolean = true,
+    onToggleAppLock: (Boolean) -> Unit = {},
     onToggleAmoledTheme: () -> Unit,
     onRequestSmsPermission: () -> Unit,
     onSyncSms: () -> Unit,
@@ -179,6 +186,7 @@ fun MainVaultScreen(
     )
     var instrumentSubTabIndex by rememberSaveable { mutableIntStateOf(InstrumentSubTab.CREDIT_CARDS.ordinal) }
     var inspectingTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
+    var showProfileModal by rememberSaveable { mutableStateOf(false) }
 
     val homeListState = rememberLazyListState()
     val searchFocusRequester = remember { FocusRequester() }
@@ -198,7 +206,7 @@ fun MainVaultScreen(
         onExitApp()
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(VaultColors.AmoledBlack)
@@ -209,8 +217,7 @@ fun MainVaultScreen(
         val sheetCorner = if (isAmoledDark) 0.dp else 24.dp
         Box(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .clip(RoundedCornerShape(bottomStart = sheetCorner, bottomEnd = sheetCorner))
                 .background(VaultColors.CredWhite)
         ) {
@@ -221,6 +228,7 @@ fun MainVaultScreen(
                     isSyncing = uiState.isSyncing,
                     isAmoledDark = isAmoledDark,
                     isLandscape = isLandscape,
+                    isAppLockEnabled = isAppLockEnabled,
                     onToggleTheme = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onToggleAmoledTheme()
@@ -254,7 +262,7 @@ fun MainVaultScreen(
                     },
                     onAvatarLockClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onLockVaultNow()
+                        showProfileModal = true
                     }
                 )
 
@@ -294,7 +302,7 @@ fun MainVaultScreen(
                 }
 
                 // =========================================================================
-                // FULL-SCREEN SWIPEABLE HORIZONTAL PAGER (GPU LAYER-ACCELERATED, ZERO FLICKER)
+                // FULL-SCREEN SWIPEABLE HORIZONTAL PAGER (3 PRIMARY TABS: HOME, CARDS, INSIGHTS)
                 // =========================================================================
                 HorizontalPager(
                     state = pagerState,
@@ -370,24 +378,12 @@ fun MainVaultScreen(
                                 }
                             }
                         )
-
-                        CredDockTab.MORE -> CredMoreAiRulesSheet(
-                            uiState = uiState,
-                            isAmoledDark = isAmoledDark,
-                            isLandscape = isLandscape,
-                            refreshRateHz = refreshRateHz,
-                            hasSecurityQuestionsSet = hasSecurityQuestionsSet,
-                            onToggleAmoledTheme = onToggleAmoledTheme,
-                            onRunSandbox = onRunSandboxSms,
-                            onResetPasscodeClick = onResetPasscodeClick,
-                            onEditSecurityQuestionsClick = onEditSecurityQuestionsClick
-                        )
                     }
                 }
             }
 
             // =========================================================================
-            // 5-SECOND UNDO DELETE PILL BAR
+            // 5-SECOND UNDO DELETE PILL BAR (FLOATS ABOVE BOTTOM LIQUID GLASS DOCK)
             // =========================================================================
             androidx.compose.animation.AnimatedVisibility(
                 visible = uiState.undoDeletedTransaction != null,
@@ -395,7 +391,7 @@ fun MainVaultScreen(
                 exit = slideOutVertically { it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 18.dp, vertical = 12.dp)
+                    .padding(horizontal = 18.dp, vertical = if (isLandscape) 58.dp else 78.dp)
             ) {
                 uiState.undoDeletedTransaction?.let { deleted ->
                     Row(
@@ -457,20 +453,57 @@ fun MainVaultScreen(
         }
 
         // =========================================================================
-        // ELEVATED 4-SLOT BOTTOM DOCK WITH GPU LIQUID GLASS SLIDING INDICATOR
+        // FLOATING 3-TAB LIQUID GLASS BOTTOM NAVIGATION (CONTENT VISIBLE UNDERNEATH)
         // =========================================================================
-        CredLiquidGlassBottomBar(
-            pagerState = pagerState,
-            isLandscape = isLandscape,
-            onSelectTab = { nextTab ->
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                scope.launch {
-                    pagerState.animateScrollToPage(
-                        page = nextTab.ordinal,
-                        animationSpec = tween(260, easing = FastOutSlowInEasing)
-                    )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(
+                    horizontal = if (isLandscape) 40.dp else 18.dp,
+                    vertical = if (isLandscape) 6.dp else 12.dp
+                )
+        ) {
+            CredLiquidGlassBottomBar(
+                pagerState = pagerState,
+                isLandscape = isLandscape,
+                onSelectTab = { nextTab ->
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    scope.launch {
+                        pagerState.animateScrollToPage(
+                            page = nextTab.ordinal,
+                            animationSpec = tween(260, easing = FastOutSlowInEasing)
+                        )
+                    }
                 }
-            }
+            )
+        }
+    }
+
+    if (showProfileModal) {
+        CredProfileModalSheet(
+            uiState = uiState,
+            isAmoledDark = isAmoledDark,
+            isLandscape = isLandscape,
+            refreshRateHz = refreshRateHz,
+            isAppLockEnabled = isAppLockEnabled,
+            hasSecurityQuestionsSet = hasSecurityQuestionsSet,
+            onToggleAppLock = onToggleAppLock,
+            onToggleAmoledTheme = onToggleAmoledTheme,
+            onResetPasscodeClick = {
+                showProfileModal = false
+                onResetPasscodeClick()
+            },
+            onEditSecurityQuestionsClick = {
+                showProfileModal = false
+                onEditSecurityQuestionsClick()
+            },
+            onLockVaultNow = {
+                showProfileModal = false
+                onLockVaultNow()
+            },
+            onRunSandbox = onRunSandboxSms,
+            onDismiss = { showProfileModal = false }
         )
     }
 
@@ -503,6 +536,7 @@ private fun CredTopBar(
     isSyncing: Boolean,
     isAmoledDark: Boolean,
     isLandscape: Boolean,
+    isAppLockEnabled: Boolean = true,
     onToggleTheme: () -> Unit,
     onPrevMonth: () -> Unit,
     onNextMonth: () -> Unit,
@@ -523,7 +557,7 @@ private fun CredTopBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left: Lock Avatar
+        // Left: Profile & Lock Avatar (Opens Profile Sheet)
         Box(
             modifier = Modifier
                 .size(40.dp)
@@ -539,7 +573,7 @@ private fun CredTopBar(
             ) {
                 Icon(
                     imageVector = Icons.Outlined.PersonOutline,
-                    contentDescription = "Lock Vault",
+                    contentDescription = "Profile & Settings",
                     tint = VaultColors.InkPrimary,
                     modifier = Modifier.size(19.dp)
                 )
@@ -549,14 +583,14 @@ private fun CredTopBar(
                     .size(16.dp)
                     .align(Alignment.BottomEnd)
                     .clip(CircleShape)
-                    .background(VaultColors.InkPrimary)
+                    .background(if (isAppLockEnabled) VaultColors.InkPrimary else VaultColors.CreditGreen)
                     .border(1.dp, VaultColors.CredWhite, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Lock,
+                    imageVector = if (isAppLockEnabled) Icons.Outlined.Lock else Icons.Outlined.AutoAwesome,
                     contentDescription = null,
-                    tint = VaultColors.OnInkPrimary,
+                    tint = if (isAppLockEnabled) VaultColors.OnInkPrimary else Color.Black,
                     modifier = Modifier.size(9.dp)
                 )
             }
@@ -684,8 +718,9 @@ private fun CredTopBar(
 }
 
 /**
- * Elevated 4-Slot #000000 Bottom Navigation Dock with GPU RenderThread "Liquid Glass" Lens
- * Zero recomposition and zero layout passes per frame at 60Hz / 120Hz / 144Hz!
+ * Floating 3-Slot Liquid Glass Bottom Navigation Dock
+ * Content is visible in the background underneath through the translucent liquid glass!
+ * GPU RenderThread accelerated, zero recomposition, zero layout passes per frame at 60Hz / 120Hz / 144Hz.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -699,112 +734,100 @@ private fun CredLiquidGlassBottomBar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(VaultColors.AmoledBlack)
-            .navigationBarsPadding()
-            .padding(
-                horizontal = if (isLandscape) 28.dp else 14.dp,
-                vertical = if (isLandscape) 5.dp else 10.dp
+            .height(if (isLandscape) 46.dp else 56.dp)
+            .shadow(
+                elevation = 12.dp,
+                shape = RoundedCornerShape(28.dp),
+                ambientColor = Color.Black.copy(alpha = 0.40f),
+                spotColor = Color.Black.copy(alpha = 0.55f)
             )
+            .clip(RoundedCornerShape(28.dp))
+            .background(
+                if (VaultColors.isAmoledDark) Color(0xCC090B10) else Color(0xD9FFFFFF)
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.42f),
+                        Color.White.copy(alpha = 0.10f),
+                        Color(0xFF93C5FD).copy(alpha = 0.30f)
+                    )
+                ),
+                shape = RoundedCornerShape(28.dp)
+            )
+            .padding(4.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(if (isLandscape) 46.dp else 58.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF0C0E14))
-                .border(1.dp, Color(0xFF232838), RoundedCornerShape(24.dp))
-                .padding(4.dp)
-        ) {
-            // =========================================================================
-            // GPU-ACCELERATED LIQUID GLASS LENS (0 RECOMPOSITIONS, 0 RE-LAYOUTS!)
-            // =========================================================================
-            Row(modifier = Modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .graphicsLayer {
-                            val livePos = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
-                                .coerceIn(0f, (tabCount - 1).toFloat())
-                            translationX = size.width * livePos
-                        }
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = 0.24f),
-                                    Color(0xFFA5C9FF).copy(alpha = 0.10f),
-                                    Color.White.copy(alpha = 0.14f)
-                                )
+        // =========================================================================
+        // GPU-ACCELERATED LIQUID GLASS LENS (NO TOP SPECULAR LINE!)
+        // =========================================================================
+        Row(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .graphicsLayer {
+                        val livePos = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+                            .coerceIn(0f, (tabCount - 1).toFloat())
+                        translationX = size.width * livePos
+                    }
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.22f),
+                                Color(0xFFA5C9FF).copy(alpha = 0.10f),
+                                Color.White.copy(alpha = 0.14f)
                             )
                         )
-                        .border(
-                            width = 1.2.dp,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = 0.68f),
-                                    Color.White.copy(alpha = 0.12f),
-                                    Color(0xFF93C5FD).copy(alpha = 0.45f)
-                                )
-                            ),
-                            shape = RoundedCornerShape(20.dp)
-                        )
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 1.dp)
-                            .fillMaxWidth(0.55f)
-                            .height(1.5.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.White.copy(alpha = 0.55f))
                     )
-                }
-                Spacer(modifier = Modifier.weight((tabCount - 1).toFloat()))
-            }
+                    .border(
+                        width = 1.2.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.65f),
+                                Color.White.copy(alpha = 0.14f),
+                                Color(0xFF93C5FD).copy(alpha = 0.45f)
+                            )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
+                    )
+            )
+            Spacer(modifier = Modifier.weight((tabCount - 1).toFloat()))
+        }
 
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                CredSlimDockItem(
-                    tab = CredDockTab.HOME,
-                    pagerState = pagerState,
-                    isLandscape = isLandscape,
-                    activeIcon = Icons.Filled.Home,
-                    inactiveIcon = Icons.Outlined.Home,
-                    onClick = { onSelectTab(CredDockTab.HOME) },
-                    modifier = Modifier.weight(1f)
-                )
-                CredSlimDockItem(
-                    tab = CredDockTab.CARDS,
-                    pagerState = pagerState,
-                    isLandscape = isLandscape,
-                    activeIcon = Icons.Outlined.CreditCard,
-                    inactiveIcon = Icons.Outlined.CreditCard,
-                    onClick = { onSelectTab(CredDockTab.CARDS) },
-                    modifier = Modifier.weight(1f)
-                )
-                CredSlimDockItem(
-                    tab = CredDockTab.INSIGHTS,
-                    pagerState = pagerState,
-                    isLandscape = isLandscape,
-                    activeIcon = Icons.Outlined.Stars,
-                    inactiveIcon = Icons.Outlined.Stars,
-                    onClick = { onSelectTab(CredDockTab.INSIGHTS) },
-                    modifier = Modifier.weight(1f)
-                )
-                CredSlimDockItem(
-                    tab = CredDockTab.MORE,
-                    pagerState = pagerState,
-                    isLandscape = isLandscape,
-                    activeIcon = Icons.Outlined.GridView,
-                    inactiveIcon = Icons.Outlined.GridView,
-                    onClick = { onSelectTab(CredDockTab.MORE) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CredSlimDockItem(
+                tab = CredDockTab.HOME,
+                pagerState = pagerState,
+                isLandscape = isLandscape,
+                activeIcon = Icons.Filled.Home,
+                inactiveIcon = Icons.Outlined.Home,
+                onClick = { onSelectTab(CredDockTab.HOME) },
+                modifier = Modifier.weight(1f)
+            )
+            CredSlimDockItem(
+                tab = CredDockTab.CARDS,
+                pagerState = pagerState,
+                isLandscape = isLandscape,
+                activeIcon = Icons.Outlined.CreditCard,
+                inactiveIcon = Icons.Outlined.CreditCard,
+                onClick = { onSelectTab(CredDockTab.CARDS) },
+                modifier = Modifier.weight(1f)
+            )
+            CredSlimDockItem(
+                tab = CredDockTab.INSIGHTS,
+                pagerState = pagerState,
+                isLandscape = isLandscape,
+                activeIcon = Icons.Outlined.Stars,
+                inactiveIcon = Icons.Outlined.Stars,
+                onClick = { onSelectTab(CredDockTab.INSIGHTS) },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -907,7 +930,7 @@ private fun CredHomeSheetContent(
         modifier = Modifier
             .fillMaxSize()
             .background(VaultColors.CredWhite),
-        contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 6.dp),
+        contentPadding = PaddingValues(start = horizontalPad, end = horizontalPad, top = 6.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // 1. MONTHLY OUTFLOW HERO CARD (Uniform Sans-Serif Numbers, No Manual Train Button)
@@ -1101,6 +1124,24 @@ private fun CredHomeSheetContent(
                             onToggleMoneyMatterFilter(MoneyMatterFilter.SELF_TRANSFER)
                         }
                     )
+
+                    if (uiState.monthSalaryTotal > 0.0 || uiState.selectedMoneyMatter == MoneyMatterFilter.SALARY) {
+                        val isSalarySel = uiState.selectedMoneyMatter == MoneyMatterFilter.SALARY
+                        CredMoneyMatterCapsule(
+                            title = "salary",
+                            subtitle = "payroll cr",
+                            amount = uiState.monthSalaryTotal,
+                            prefix = "+",
+                            amountColor = Color(0xFF00E676),
+                            selected = isSalarySel,
+                            bgColor = if (isSalarySel) Color(0xFF00E676).copy(alpha = 0.20f) else VaultColors.CardSurface,
+                            borderColor = if (isSalarySel) Color(0xFF00E676) else VaultColors.CredBorderStrong,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onToggleMoneyMatterFilter(MoneyMatterFilter.SALARY)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1324,6 +1365,36 @@ private fun CredHomeSheetContent(
                     }
                 }
 
+                // Active Category Filter Indicator Pill
+                if (uiState.selectedCategory != null) {
+                    val activeCat = uiState.selectedCategory!!
+                    val count = uiState.filteredTransactions.size
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(activeCat.colorHex).copy(alpha = if (VaultColors.isAmoledDark) 0.26f else 0.16f))
+                            .border(1.2.dp, Color(activeCat.colorHex), RoundedCornerShape(50))
+                            .clickable { onToggleCategoryFilter(null) }
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Color(activeCat.colorHex))
+                        )
+                        Spacer(modifier = Modifier.width(7.dp))
+                        Text(
+                            text = "category: ${activeCat.displayName.lowercase()} ($count spends)  ✕",
+                            fontFamily = CredSansFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (VaultColors.isAmoledDark) Color.White else Color(activeCat.colorHex)
+                        )
+                    }
+                }
+
                 // EXPLORE SPENDS Category Strip
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1510,9 +1581,11 @@ private fun CredTransactionRowCard(
     val haptic = LocalHapticFeedback.current
     val isSelf = txn.isSelfTransfer || txn.category == SpendCategory.SELF_TRANSFER.name
     val isCardBill = !isSelf && txn.category == SpendCategory.CREDIT_CARD_BILL.name
+    val isSalary = !isSelf && !isCardBill && txn.category == SpendCategory.SALARY.name
     val category = when {
         isSelf -> SpendCategory.SELF_TRANSFER
         isCardBill -> SpendCategory.CREDIT_CARD_BILL
+        isSalary -> SpendCategory.SALARY
         else -> SpendCategory.fromNameOrDefault(txn.category)
     }
     val isCredit = txn.type == TransactionType.CREDIT.name
@@ -1523,6 +1596,7 @@ private fun CredTransactionRowCard(
         isExcluded -> VaultColors.BlackedOutCard
         isSelf -> VaultColors.SelfYellowBg
         isCardBill -> VaultColors.CardBillBg
+        isSalary -> if (VaultColors.isAmoledDark) Color(0xFF042010) else Color(0xFFE8F8F0)
         else -> VaultColors.CardSurface
     }
 
@@ -1530,12 +1604,14 @@ private fun CredTransactionRowCard(
         isExcluded -> Color(0xFF1A1C24)
         isSelf -> VaultColors.SelfYellowBorder
         isCardBill -> VaultColors.CardBillBlue.copy(alpha = 0.45f)
+        isSalary -> Color(0xFF00E676)
         else -> VaultColors.CredBorder
     }
 
     val titleColor = when {
         isExcluded -> Color(0xFF848C9E)
         isSelf -> VaultColors.SelfYellowText
+        isSalary -> if (VaultColors.isAmoledDark) Color(0xFF00E676) else Color(0xFF008744)
         else -> VaultColors.InkPrimary
     }
 
@@ -1543,6 +1619,7 @@ private fun CredTransactionRowCard(
         isExcluded -> Color(0xFF848C9E)
         isSelf -> VaultColors.SelfYellowText
         isCardBill -> VaultColors.CardBillBlue
+        isSalary -> Color(0xFF00E676)
         isCredit -> VaultColors.CreditGreen
         else -> VaultColors.DebitRed
     }
@@ -1550,7 +1627,7 @@ private fun CredTransactionRowCard(
     val amountPrefix = when {
         isSelf -> "⇄ "
         isCardBill -> ""
-        isCredit -> "+"
+        isCredit || isSalary -> "+"
         else -> "-"
     }
 
@@ -1631,6 +1708,20 @@ private fun CredTransactionRowCard(
                                 if (VaultColors.isAmoledDark) VaultColors.SelfYellowText
                                 else VaultColors.SelfYellowBorder.copy(alpha = 0.35f)
                             )
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                } else if (isSalary) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "SALARY",
+                        fontFamily = CredSansFontFamily,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.8.sp,
+                        color = Color.Black,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFF00E676))
                             .padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 } else if (isCardBill) {
@@ -1731,6 +1822,7 @@ private fun CredTransactionRowCard(
                 color = when {
                     isExcluded -> Color(0xFF6B7280)
                     isSelf -> VaultColors.SelfYellowText
+                    isSalary -> Color(0xFF00E676)
                     else -> VaultColors.InkSecondary
                 }
             )
@@ -1802,7 +1894,7 @@ private fun CardsUpiWalletsSheet(
             val activeSub = InstrumentSubTab.entries[subIdx]
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 8.dp),
+                contentPadding = PaddingValues(start = horizontalPad, end = horizontalPad, top = 8.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 when (activeSub) {
@@ -2067,7 +2159,7 @@ private fun EmptyInstrumentNotice(message: String) {
 }
 
 // =========================================================================
-// INSIGHTS TAB: SCROLLABLE SPEND TREND + CATEGORY DONUT + TOP MERCHANTS
+// INSIGHTS TAB: (1) CATEGORY BREAKDOWN -> (2) SPEND TREND -> (3) TOP MERCHANTS
 // =========================================================================
 @Composable
 private fun CredInsightsSheet(
@@ -2083,58 +2175,10 @@ private fun CredInsightsSheet(
         modifier = Modifier
             .fillMaxSize()
             .background(VaultColors.CredWhite),
-        contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 8.dp),
+        contentPadding = PaddingValues(start = horizontalPad, end = horizontalPad, top = 8.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            CredSurfaceCard(cornerRadius = 16.dp) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "monthly spend trend",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = VaultColors.InkPrimary
-                        )
-                        Text(
-                            text = "scroll horizontally & tap any month",
-                            fontFamily = CredSansFontFamily,
-                            fontSize = 12.sp,
-                            color = VaultColors.InkSecondary
-                        )
-                    }
-
-                    if (!uiState.isCurrentMonthSelected) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(VaultColors.InkPrimary)
-                                .clickable { onJumpToCurrentMonth() }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "current month",
-                                fontFamily = CredSansFontFamily,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = VaultColors.OnInkPrimary
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-                MonthlyTrendBarChart(
-                    points = uiState.monthlyTrend,
-                    selectedKey = uiState.selectedMonth.toString(),
-                    onSelectMonth = onSelectYearMonth
-                )
-            }
-        }
-
+        // 1. CATEGORY BREAKDOWN ON TOP!
         item {
             CredSurfaceCard(cornerRadius = 16.dp) {
                 Row(
@@ -2256,6 +2300,57 @@ private fun CredInsightsSheet(
             }
         }
 
+        // 2. MONTHLY SPEND TREND NEXT!
+        item {
+            CredSurfaceCard(cornerRadius = 16.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "monthly spend trend",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = VaultColors.InkPrimary
+                        )
+                        Text(
+                            text = "scroll horizontally & tap any month",
+                            fontFamily = CredSansFontFamily,
+                            fontSize = 12.sp,
+                            color = VaultColors.InkSecondary
+                        )
+                    }
+
+                    if (!uiState.isCurrentMonthSelected) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(VaultColors.InkPrimary)
+                                .clickable { onJumpToCurrentMonth() }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "current month",
+                                fontFamily = CredSansFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = VaultColors.OnInkPrimary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                MonthlyTrendBarChart(
+                    points = uiState.monthlyTrend,
+                    selectedKey = uiState.selectedMonth.toString(),
+                    onSelectMonth = onSelectYearMonth
+                )
+            }
+        }
+
+        // 3. TOP MERCHANTS
         if (uiState.topMerchants.isNotEmpty()) {
             item {
                 CredSurfaceCard(cornerRadius = 16.dp) {
@@ -2314,26 +2409,31 @@ private fun CredInsightsSheet(
             }
         }
 
-        item { Spacer(modifier = Modifier.height(32.dp)) }
+        item { Spacer(modifier = Modifier.height(88.dp)) }
     }
 }
 
 // =========================================================================
-// MORE TAB: APPEARANCE + PASSCODE RECOVERY + LIVE SMS SANDBOX + CUSTOM RULES
+// PROFILE & SECURITY BOTTOM SHEET (ALL MORE OPTIONS + APP LOCK TOGGLE)
 // =========================================================================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CredMoreAiRulesSheet(
+private fun CredProfileModalSheet(
     uiState: VaultUiState,
     isAmoledDark: Boolean,
     isLandscape: Boolean,
     refreshRateHz: Int,
+    isAppLockEnabled: Boolean,
     hasSecurityQuestionsSet: Boolean,
+    onToggleAppLock: (Boolean) -> Unit,
     onToggleAmoledTheme: () -> Unit,
-    onRunSandbox: (String, String, Boolean) -> Unit,
     onResetPasscodeClick: () -> Unit,
-    onEditSecurityQuestionsClick: () -> Unit
+    onEditSecurityQuestionsClick: () -> Unit,
+    onLockVaultNow: () -> Unit,
+    onRunSandbox: (String, String, Boolean) -> Unit,
+    onDismiss: () -> Unit
 ) {
-    val horizontalPad = if (isLandscape) 28.dp else 16.dp
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var senderDraft by remember { mutableStateOf("AD-HDFCBK") }
     var smsDraft by remember {
         mutableStateOf(
@@ -2341,249 +2441,363 @@ private fun CredMoreAiRulesSheet(
         )
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(VaultColors.CredWhite),
-        contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = VaultColors.CredWhite,
+        scrimColor = Color.Black.copy(alpha = 0.65f),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .width(42.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(VaultColors.CredBorderStrong)
+            )
+        }
     ) {
-        // 1. APPEARANCE MODE CARD (AMOLED Black vs Light Mode + Live Display Refresh Rate)
-        item {
-            CredSurfaceCard(cornerRadius = 16.dp) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding(),
+            contentPadding = PaddingValues(horizontal = if (isLandscape) 28.dp else 18.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Profile & Identity Header
+            item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "display & motion",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = VaultColors.InkPrimary
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${if (isAmoledDark) "AMOLED Pitch-Black" else "Light Mode"} • Adaptive ${refreshRateHz}Hz",
-                            fontFamily = CredSansFontFamily,
-                            fontSize = 12.sp,
-                            color = VaultColors.InkSecondary
-                        )
-                    }
-
-                    Row(
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(VaultColors.InkPrimary)
-                            .clickable(onClick = onToggleAmoledTheme)
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .size(50.dp)
+                            .clip(CircleShape)
+                            .background(VaultColors.CardSurface)
+                            .border(1.5.dp, VaultColors.ChampagneGold, CircleShape),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isAmoledDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
+                            imageVector = Icons.Outlined.PersonOutline,
                             contentDescription = null,
-                            tint = VaultColors.OnInkPrimary,
-                            modifier = Modifier.size(16.dp)
+                            tint = VaultColors.ChampagneGold,
+                            modifier = Modifier.size(24.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (isAmoledDark) "light mode" else "amoled black",
+                            text = "RAIZEN VAULT",
                             fontFamily = CredSansFontFamily,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = VaultColors.OnInkPrimary
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 16.sp,
+                            letterSpacing = 1.2.sp,
+                            color = VaultColors.InkPrimary
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "100% Offline • Zero Trackers • Hardware AES",
+                            fontFamily = CredSansFontFamily,
+                            fontSize = 11.sp,
+                            color = VaultColors.CreditGreen
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Close",
+                            tint = VaultColors.InkSecondary
                         )
                     }
                 }
             }
-        }
 
-        // 2. PASSCODE & 3 SECURITY QUESTIONS CARD
-        item {
-            CredSurfaceCard(cornerRadius = 16.dp) {
-                Text(
-                    text = "passcode & recovery",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = VaultColors.InkPrimary
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = if (hasSecurityQuestionsSet) {
-                        "Your 3 personal recovery questions are saved. You can change or reset your passcode anytime."
-                    } else {
-                        "Set your 3 personal security questions so you can recover your passcode anytime."
-                    },
-                    fontFamily = CredSansFontFamily,
-                    fontSize = 12.sp,
-                    color = VaultColors.InkSecondary
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-                CredPrimaryPillButton(
-                    label = "change passcode",
-                    onClick = onResetPasscodeClick
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                CredSecondaryPillButton(
-                    label = if (hasSecurityQuestionsSet) "update 3 security questions" else "set 3 security questions",
-                    onClick = onEditSecurityQuestionsClick
-                )
-            }
-        }
-
-        // 3. LIVE SMS PARSER SANDBOX
-        item {
-            CredSurfaceCard(cornerRadius = 16.dp) {
-                Text(
-                    text = "test any sms",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = VaultColors.InkPrimary
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Tap a preset or paste any bank, card, UPI, or coupon SMS to verify how it is classified.",
-                    fontFamily = CredSansFontFamily,
-                    fontSize = 12.sp,
-                    color = VaultColors.InkSecondary
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    PresetSmsChip("cred club bill") {
-                        senderDraft = "AD-HDFCBK"
-                        smsDraft = "Sent Rs.5944.00 From HDFC Bank A/C *4821 To CRED Club On 05/11/26 Ref 12340936"
-                        onRunSandbox(senderDraft, smsDraft, false)
-                    }
-                    PresetSmsChip("irctc rail") {
-                        senderDraft = "AD-HDFCBK"
-                        smsDraft = "Sent Rs.745.00 From HDFC Bank A/C *4821 To BDPG2 IR On 14/11/26 Ref 998812"
-                        onRunSandbox(senderDraft, smsDraft, false)
-                    }
-                    PresetSmsChip("self transfer") {
-                        senderDraft = "AD-HDFCBK"
-                        smsDraft = "Rs. 15,000.00 debited from A/c XX4821 and credited to A/c XX9115 via Self Transfer."
-                        onRunSandbox(senderDraft, smsDraft, false)
-                    }
-                    PresetSmsChip("tira coupon") {
-                        senderDraft = "JX-atTIRA-S"
-                        smsDraft = "Rs.1100 off coupon credited in your Tira account! secret code: PAYDAY Valid only for 6 hours!"
-                        onRunSandbox(senderDraft, smsDraft, false)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = smsDraft,
-                    onValueChange = { smsDraft = it },
-                    minLines = 3,
-                    maxLines = 5,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = VaultColors.InkPrimary,
-                        unfocusedBorderColor = VaultColors.CredBorderStrong,
-                        focusedContainerColor = VaultColors.CredCanvasSubtle,
-                        unfocusedContainerColor = VaultColors.CredCanvasSubtle,
-                        focusedTextColor = VaultColors.InkPrimary,
-                        unfocusedTextColor = VaultColors.InkPrimary
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CredPrimaryPillButton(
-                        label = "test parse",
-                        onClick = { onRunSandbox(senderDraft, smsDraft, false) },
-                        modifier = Modifier.weight(1f)
-                    )
-                    CredSecondaryPillButton(
-                        label = "add to vault",
-                        onClick = { onRunSandbox(senderDraft, smsDraft, true) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                uiState.sandboxResult?.let { outcome ->
-                    Spacer(modifier = Modifier.height(14.dp))
-                    SandboxOutcomeView(outcome = outcome)
-                }
-            }
-        }
-
-        // 4. LEARNED MERCHANT RULES
-        item {
-            CredSurfaceCard(cornerRadius = 16.dp) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            // 1. Passcode & Security (With Optional App Lock Toggle!)
+            item {
+                CredSurfaceCard(cornerRadius = 16.dp) {
                     Text(
-                        text = "custom merchant rules (${uiState.learnedMerchants.size})",
+                        text = "passcode & security",
                         style = MaterialTheme.typography.titleLarge,
                         color = VaultColors.InkPrimary
                     )
-                    Icon(
-                        imageVector = Icons.Outlined.AutoAwesome,
-                        contentDescription = null,
-                        tint = VaultColors.CreditGreen,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                if (uiState.learnedMerchants.isEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Tap any transaction to customize a merchant or category — your learned rules appear here.",
+                        text = "Passcode & biometric lock can be toggled optional anytime.",
                         fontFamily = CredSansFontFamily,
                         fontSize = 12.sp,
                         color = VaultColors.InkSecondary
                     )
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        uiState.learnedMerchants.forEach { rule ->
-                            val cat = SpendCategory.fromNameOrDefault(rule.category)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Optional App Lock Switch
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(VaultColors.CredCanvasSubtle)
+                            .border(1.dp, VaultColors.CredBorder, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "require passcode to open",
+                                fontFamily = CredSansFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = VaultColors.InkPrimary
+                            )
+                            Text(
+                                text = if (isAppLockEnabled) "Enabled: vault locked on launch" else "Disabled: opens without passcode",
+                                fontFamily = CredSansFontFamily,
+                                fontSize = 11.sp,
+                                color = if (isAppLockEnabled) VaultColors.CreditGreen else VaultColors.DebitRed
+                            )
+                        }
+                        Switch(
+                            checked = isAppLockEnabled,
+                            onCheckedChange = onToggleAppLock,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = VaultColors.CreditGreen,
+                                uncheckedThumbColor = Color(0xFFA6AEBC),
+                                uncheckedTrackColor = VaultColors.CardSurface
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    CredPrimaryPillButton(
+                        label = "lock app now",
+                        onClick = onLockVaultNow
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CredSecondaryPillButton(
+                            label = "change passcode",
+                            onClick = onResetPasscodeClick,
+                            modifier = Modifier.weight(1f)
+                        )
+                        CredSecondaryPillButton(
+                            label = if (hasSecurityQuestionsSet) "3 questions ✓" else "setup questions",
+                            onClick = onEditSecurityQuestionsClick,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            // 2. Display & Motion
+            item {
+                CredSurfaceCard(cornerRadius = 16.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "display & motion",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = VaultColors.InkPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${if (isAmoledDark) "AMOLED Black" else "Light Mode"} • Adaptive ${refreshRateHz}Hz",
+                                fontFamily = CredSansFontFamily,
+                                fontSize = 12.sp,
+                                color = VaultColors.InkSecondary
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(VaultColors.InkPrimary)
+                                .clickable(onClick = onToggleAmoledTheme)
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isAmoledDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
+                                contentDescription = null,
+                                tint = VaultColors.OnInkPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isAmoledDark) "light" else "amoled",
+                                fontFamily = CredSansFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = VaultColors.OnInkPrimary
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. Live SMS Sandbox
+            item {
+                CredSurfaceCard(cornerRadius = 16.dp) {
+                    Text(
+                        text = "test any sms",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = VaultColors.InkPrimary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Tap a preset or paste any bank, card, UPI, or salary SMS to verify classification.",
+                        fontFamily = CredSansFontFamily,
+                        fontSize = 12.sp,
+                        color = VaultColors.InkSecondary
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        PresetSmsChip("cred club bill") {
+                            senderDraft = "AD-HDFCBK"
+                            smsDraft = "Sent Rs.5944.00 From HDFC Bank A/C *4821 To CRED Club On 05/11/26 Ref 12340936"
+                            onRunSandbox(senderDraft, smsDraft, false)
+                        }
+                        PresetSmsChip("salary credit") {
+                            senderDraft = "AD-HDFCBK"
+                            smsDraft = "A/c XX4821 credited with Rs 65,000.00 on 31-Oct-26 by NEFT-ACME CORP-SALARY FOR OCT. Ref: HDFCN12345"
+                            onRunSandbox(senderDraft, smsDraft, false)
+                        }
+                        PresetSmsChip("irctc rail") {
+                            senderDraft = "AD-HDFCBK"
+                            smsDraft = "Sent Rs.745.00 From HDFC Bank A/C *4821 To BDPG2 IR On 14/11/26 Ref 998812"
+                            onRunSandbox(senderDraft, smsDraft, false)
+                        }
+                        PresetSmsChip("self transfer") {
+                            senderDraft = "AD-HDFCBK"
+                            smsDraft = "Rs. 15,000.00 debited from A/c XX4821 and credited to A/c XX9115 via Self Transfer."
+                            onRunSandbox(senderDraft, smsDraft, false)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = smsDraft,
+                        onValueChange = { smsDraft = it },
+                        minLines = 3,
+                        maxLines = 5,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = VaultColors.InkPrimary,
+                            unfocusedBorderColor = VaultColors.CredBorderStrong,
+                            focusedContainerColor = VaultColors.CredCanvasSubtle,
+                            unfocusedContainerColor = VaultColors.CredCanvasSubtle,
+                            focusedTextColor = VaultColors.InkPrimary,
+                            unfocusedTextColor = VaultColors.InkPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CredPrimaryPillButton(
+                            label = "test parse",
+                            onClick = { onRunSandbox(senderDraft, smsDraft, false) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        CredSecondaryPillButton(
+                            label = "add to vault",
+                            onClick = { onRunSandbox(senderDraft, smsDraft, true) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    uiState.sandboxResult?.let { outcome ->
+                        Spacer(modifier = Modifier.height(14.dp))
+                        SandboxOutcomeView(outcome = outcome)
+                    }
+                }
+            }
+
+            // 4. Custom Learned Rules
+            item {
+                CredSurfaceCard(cornerRadius = 16.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "custom merchant rules (${uiState.learnedMerchants.size})",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = VaultColors.InkPrimary
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            tint = VaultColors.CreditGreen,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (uiState.learnedMerchants.isEmpty()) {
+                        Text(
+                            text = "Tap any transaction to customize a merchant or category — your learned rules appear here.",
+                            fontFamily = CredSansFontFamily,
+                            fontSize = 12.sp,
+                            color = VaultColors.InkSecondary
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            uiState.learnedMerchants.forEach { rule ->
+                                val cat = SpendCategory.fromNameOrDefault(rule.category)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = rule.displayName,
+                                            fontFamily = CredSansFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = VaultColors.InkPrimary
+                                        )
+                                        Text(
+                                            text = "code: ${rule.normalizedKey}",
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.sp,
+                                            color = VaultColors.InkMuted
+                                        )
+                                    }
                                     Text(
-                                        text = rule.displayName,
+                                        text = cat.displayName.lowercase(),
                                         fontFamily = CredSansFontFamily,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = VaultColors.InkPrimary
-                                    )
-                                    Text(
-                                        text = "code: ${rule.normalizedKey}",
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
-                                        color = VaultColors.InkMuted
+                                        color = Color(cat.colorHex)
                                     )
                                 }
-                                Text(
-                                    text = cat.displayName.lowercase(),
-                                    fontFamily = CredSansFontFamily,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(cat.colorHex)
-                                )
                             }
                         }
                     }
                 }
             }
-        }
 
-        item { Spacer(modifier = Modifier.height(32.dp)) }
+            item { Spacer(modifier = Modifier.height(24.dp)) }
+        }
     }
 }
 

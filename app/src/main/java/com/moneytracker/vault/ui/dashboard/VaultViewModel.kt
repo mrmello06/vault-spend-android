@@ -44,7 +44,8 @@ enum class MoneyMatterFilter {
     DEBITED,
     CREDITED,
     CARD_BILLS,
-    SELF_TRANSFER
+    SELF_TRANSFER,
+    SALARY
 }
 
 @Immutable
@@ -56,6 +57,7 @@ data class VaultUiState(
     val monthTotalCredited: Double = 0.0,
     val monthSelfTransferTotal: Double = 0.0,
     val monthCardBillsPaidTotal: Double = 0.0,
+    val monthSalaryTotal: Double = 0.0,
     val monthDailyAverage: Double = 0.0,
     val monthTransactionCount: Int = 0,
     val previousMonthDeltaPercent: Float? = null,
@@ -182,6 +184,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             .filter { it.isCardBillSettlement() && it.type == TransactionType.DEBIT.name }
             .sumOf { it.amount }
 
+        val salaryTotal = monthTxns
+            .filter { it.category == SpendCategory.SALARY.name && it.type == TransactionType.CREDIT.name }
+            .sumOf { it.amount }
+
         val prevMonthSpent = txnsByMonth[selectedYm.minusMonths(1)]
             .orEmpty()
             .filter {
@@ -236,6 +242,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                         !txn.isCardBillSettlement()
                 MoneyMatterFilter.CARD_BILLS -> txn.isCardBillSettlement()
                 MoneyMatterFilter.SELF_TRANSFER -> txn.isSelfTransferEntry()
+                MoneyMatterFilter.SALARY -> txn.category == SpendCategory.SALARY.name
             }
 
             val matchesCat = filters.category == null ||
@@ -420,6 +427,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             monthTotalCredited = totalCredited,
             monthSelfTransferTotal = selfTransferVolume,
             monthCardBillsPaidTotal = cardBillsPaid,
+            monthSalaryTotal = salaryTotal,
             monthDailyAverage = dailyAvg,
             monthTransactionCount = monthTxns.size,
             previousMonthDeltaPercent = momDelta,

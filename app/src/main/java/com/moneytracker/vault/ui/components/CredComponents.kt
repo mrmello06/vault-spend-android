@@ -1,6 +1,7 @@
 package com.moneytracker.vault.ui.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -134,7 +135,7 @@ fun CredSurfaceCard(
 }
 
 /**
- * Adaptive CRED Capsule Filter Pill (AMOLED & Light Mode readable)
+ * Adaptive CRED Capsule Filter Pill (High-Contrast Vivid AMOLED & Light Mode readable)
  */
 @Composable
 fun CredExplorePill(
@@ -146,21 +147,32 @@ fun CredExplorePill(
 ) {
     val haptic = LocalHapticFeedback.current
     val shape = RoundedCornerShape(50)
-    val brush = Brush.verticalGradient(
-        colors = if (selected) {
-            listOf(accentColor.copy(alpha = 0.22f), accentColor.copy(alpha = 0.34f))
-        } else {
-            listOf(VaultColors.CardSurface, accentColor.copy(alpha = if (VaultColors.isAmoledDark) 0.08f else 0.10f))
-        }
+
+    val targetBgColor = if (selected) {
+        if (VaultColors.isAmoledDark) accentColor.copy(alpha = 0.28f) else accentColor.copy(alpha = 0.18f)
+    } else {
+        if (VaultColors.isAmoledDark) Color(0xFF141720) else VaultColors.CardSurface
+    }
+    val animatedBgColor by animateColorAsState(
+        targetValue = targetBgColor,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "pillBgColor"
+    )
+
+    val targetBorderColor = if (selected) accentColor else VaultColors.CredBorderStrong
+    val animatedBorderColor by animateColorAsState(
+        targetValue = targetBorderColor,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "pillBorderColor"
     )
 
     Row(
         modifier = Modifier
             .clip(shape)
-            .background(brush)
+            .background(animatedBgColor)
             .border(
-                width = if (selected) 1.4.dp else 1.dp,
-                color = if (selected) accentColor else VaultColors.CredBorderStrong,
+                width = if (selected) 1.8.dp else 1.dp,
+                color = animatedBorderColor,
                 shape = shape
             )
             .clickable {
@@ -170,6 +182,16 @@ fun CredExplorePill(
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(accentColor)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+
         if (icon != null) {
             Icon(
                 imageVector = icon,
@@ -179,12 +201,13 @@ fun CredExplorePill(
             )
             Spacer(modifier = Modifier.width(6.dp))
         }
+
         Text(
             text = label.lowercase(),
             fontFamily = CredSansFontFamily,
             fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-            color = VaultColors.InkPrimary
+            fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (selected) (if (VaultColors.isAmoledDark) Color.White else accentColor) else VaultColors.InkPrimary
         )
     }
 }
@@ -280,6 +303,7 @@ fun SpendCategory.iconVector(): ImageVector = when (this) {
     SpendCategory.HEALTH_WELLNESS -> Icons.Outlined.FavoriteBorder
     SpendCategory.INVESTMENTS_FINANCE -> Icons.AutoMirrored.Outlined.TrendingUp
     SpendCategory.EDUCATION -> Icons.Outlined.School
+    SpendCategory.SALARY -> Icons.Outlined.AccountBalance
     SpendCategory.CREDIT_CARD_BILL -> Icons.Outlined.CreditScore
     SpendCategory.SELF_TRANSFER -> Icons.AutoMirrored.Outlined.CompareArrows
     SpendCategory.TRANSFERS -> Icons.Outlined.PersonOutline
@@ -291,10 +315,10 @@ fun CategoryBadgeIcon(
     category: SpendCategory,
     size: Dp = 44.dp
 ) {
-    val tint = if (category == SpendCategory.SELF_TRANSFER) {
-        VaultColors.SelfYellowText
-    } else {
-        Color(category.colorHex)
+    val tint = when (category) {
+        SpendCategory.SELF_TRANSFER -> VaultColors.SelfYellowText
+        SpendCategory.SALARY -> Color(0xFF00E676)
+        else -> Color(category.colorHex)
     }
     Box(
         modifier = Modifier
@@ -523,196 +547,204 @@ fun LuxuryInstrumentCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0xFF0A0B10))
             .then(
                 if (!VaultColors.isAmoledDark) {
                     Modifier.shadow(6.dp, shape, ambientColor = Color.Black.copy(alpha = 0.14f))
                 } else Modifier
             )
-            .graphicsLayer {
-                this.rotationY = rotationY
-                cameraDistance = 14f * density
-            }
-            .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF222531),
-                        Color(0xFF13151C),
-                        Color(0xFF0A0B0F)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    this.rotationY = rotationY
+                    cameraDistance = 16f * density
+                    clip = true
+                }
+                .clip(shape)
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF222531),
+                            Color(0xFF13151C),
+                            Color(0xFF0A0B0F)
+                        )
                     )
                 )
-            )
-            .border(
-                width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) accent else Color(0xFF363A4B),
-                shape = shape
-            )
-            .clickable {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
-            }
-            .padding(20.dp)
-    ) {
-        if (rotationY <= 90f) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = if (account.primaryRail == PaymentRail.CREDIT_CARD) Icons.Outlined.CreditCard else Icons.Outlined.AccountBalance,
-                            contentDescription = null,
-                            tint = accent,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = account.bankName.uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White,
-                                letterSpacing = 1.8.sp
+                .border(
+                    width = if (isSelected) 2.dp else 1.dp,
+                    color = if (isSelected) accent else Color(0xFF363A4B),
+                    shape = shape
+                )
+                .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                }
+                .padding(20.dp)
+        ) {
+            if (rotationY <= 90f) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (account.primaryRail == PaymentRail.CREDIT_CARD) Icons.Outlined.CreditCard else Icons.Outlined.AccountBalance,
+                                contentDescription = null,
+                                tint = accent,
+                                modifier = Modifier.size(22.dp)
                             )
-                            Text(
-                                text = account.primaryRail.label.lowercase(),
-                                fontFamily = CredSansFontFamily,
-                                fontSize = 12.sp,
-                                color = Color(0xFFA6AEBC)
-                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = account.bankName.uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    letterSpacing = 1.8.sp
+                                )
+                                Text(
+                                    text = account.primaryRail.label.lowercase(),
+                                    fontFamily = CredSansFontFamily,
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFA6AEBC)
+                                )
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = if (account.accountLast4 == "0000") account.primaryRail.badgeText else "•••• ${account.accountLast4}",
+                                    fontFamily = CredSansFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = accent
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.10f))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        isFlipped = true
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.FlipCameraAndroid,
+                                    contentDescription = "Flip",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(20.dp))
 
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
                     ) {
-                        Box(
+                        Column {
+                            Text(
+                                text = "TOTAL SPENT",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFFA6AEBC),
+                                fontSize = 9.sp
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "-${VaultFormatters.formatInr(account.totalSpent, true)}",
+                                fontFamily = CredSansFontFamily,
+                                fontSize = 21.sp,
+                                color = Color(0xFFFF6B6B),
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+
+                        Text(
+                            text = "${account.transactionCount} spends >",
+                            fontFamily = CredSansFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = accent
+                        )
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer { this.rotationY = 180f }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${account.bankName.uppercase()} • STATS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = accent
+                        )
+                        Text(
+                            text = "flip back ↺",
+                            fontFamily = CredSansFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(Color.White.copy(alpha = 0.08f))
+                                .background(Color.White.copy(alpha = 0.12f))
+                                .clickable { isFlipped = false }
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(18.dp))
+                    val avg = if (account.transactionCount > 0) account.totalSpent / account.transactionCount else 0.0
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("AVG SPEND", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA6AEBC), fontSize = 9.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = if (account.accountLast4 == "0000") account.primaryRail.badgeText else "•••• ${account.accountLast4}",
+                                text = VaultFormatters.formatInr(avg),
                                 fontFamily = CredSansFontFamily,
-                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = accent
+                                fontSize = 15.sp,
+                                color = Color.White
                             )
                         }
-
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.10f))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    isFlipped = true
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.FlipCameraAndroid,
-                                contentDescription = "Flip",
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp)
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("CREDITS / REFUNDS", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA6AEBC), fontSize = 9.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "+${VaultFormatters.formatInr(account.totalCredited)}",
+                                fontFamily = CredSansFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Color(0xFF34D399)
                             )
                         }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Column {
-                        Text(
-                            text = "TOTAL SPENT",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFA6AEBC),
-                            fontSize = 9.sp
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "-${VaultFormatters.formatInr(account.totalSpent, true)}",
-                            fontFamily = CredSansFontFamily,
-                            fontSize = 21.sp,
-                            color = Color(0xFFFF6B6B),
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-
-                    Text(
-                        text = "${account.transactionCount} spends >",
-                        fontFamily = CredSansFontFamily,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = accent
-                    )
-                }
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer { this.rotationY = 180f }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "${account.bankName.uppercase()} • STATS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = accent
-                    )
-                    Text(
-                        text = "flip back ↺",
-                        fontFamily = CredSansFontFamily,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .clickable { isFlipped = false }
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(18.dp))
-                val avg = if (account.transactionCount > 0) account.totalSpent / account.transactionCount else 0.0
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text("AVG SPEND", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA6AEBC), fontSize = 9.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = VaultFormatters.formatInr(avg),
-                            fontFamily = CredSansFontFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Color.White
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("CREDITS / REFUNDS", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA6AEBC), fontSize = 9.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "+${VaultFormatters.formatInr(account.totalCredited)}",
-                            fontFamily = CredSansFontFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Color(0xFF34D399)
-                        )
                     }
                 }
             }

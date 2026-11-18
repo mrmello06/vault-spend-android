@@ -85,7 +85,8 @@ class MainActivity : FragmentActivity() {
                 val vaultViewModel: VaultViewModel = viewModel()
                 val uiState by vaultViewModel.uiState.collectAsStateWithLifecycle()
 
-                var isUnlocked by rememberSaveable { mutableStateOf(false) }
+                var isAppLockEnabled by remember { mutableStateOf(authManager.isAppLockEnabled()) }
+                var isUnlocked by rememberSaveable { mutableStateOf(!authManager.isAppLockEnabled()) }
                 var isResettingPasscode by rememberSaveable { mutableStateOf(false) }
                 var isEditingSecurityQuestions by rememberSaveable { mutableStateOf(false) }
                 var hasSecQuestions by remember { mutableStateOf(authManager.hasSecurityQuestionsConfigured()) }
@@ -143,7 +144,7 @@ class MainActivity : FragmentActivity() {
                             Lifecycle.Event.ON_START -> {
                                 if (isUnlocked && backgroundedAt > 0L) {
                                     val elapsed = System.currentTimeMillis() - backgroundedAt
-                                    if (elapsed > AUTO_RELOCK_MS) {
+                                    if (elapsed > AUTO_RELOCK_MS && isAppLockEnabled) {
                                         isUnlocked = false
                                     }
                                     backgroundedAt = 0L
@@ -171,7 +172,8 @@ class MainActivity : FragmentActivity() {
                 }
 
                 val rootState = when {
-                    !isUnlocked || isResettingPasscode -> RootScreenState.LOCKED
+                    isAppLockEnabled && (!isUnlocked || isResettingPasscode) -> RootScreenState.LOCKED
+                    !isAppLockEnabled && isResettingPasscode -> RootScreenState.LOCKED
                     isEditingSecurityQuestions -> RootScreenState.EDIT_RECOVERY_QUESTIONS
                     else -> RootScreenState.UNLOCKED
                 }
@@ -241,6 +243,11 @@ class MainActivity : FragmentActivity() {
                                     hasSecurityQuestionsSet = hasSecQuestions,
                                     isAmoledDark = isAmoled,
                                     refreshRateHz = detectedRefreshRateHz,
+                                    isAppLockEnabled = isAppLockEnabled,
+                                    onToggleAppLock = { enabled ->
+                                        authManager.setAppLockEnabled(enabled)
+                                        isAppLockEnabled = enabled
+                                    },
                                     onToggleAmoledTheme = {
                                         VaultColors.toggleTheme(applicationContext)
                                     },

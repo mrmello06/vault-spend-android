@@ -38,6 +38,6 @@ data class TransactionEntity(
     val note: String = "",
     val isIncludedInSpend: Boolean = true,
     val isSelfTransfer: Boolean = false,
-    val parserVersion: Int = 6,
+    val parserVersion: Int = 7,
     val fullSmsBody: String = ""
 )

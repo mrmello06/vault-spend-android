@@ -12,7 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TransactionEntity::class,
         LearnedMerchantEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class VaultDatabase : RoomDatabase() {
@@ -82,6 +82,22 @@ abstract class VaultDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Re-scan unedited credit messages with parser v7 so Salary credits are accurately identified
+                db.execSQL(
+                    """
+                    DELETE FROM transactions
+                    WHERE parserVersion < 7
+                      AND type = 'CREDIT'
+                      AND isUserModified = 0
+                      AND note = ''
+                      AND isIncludedInSpend = 1
+                    """
+                )
+            }
+        }
+
         fun getInstance(context: Context): VaultDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -94,7 +110,8 @@ abstract class VaultDatabase : RoomDatabase() {
                         MIGRATION_2_3,
                         MIGRATION_3_4,
                         MIGRATION_4_5,
-                        MIGRATION_5_6
+                        MIGRATION_5_6,
+                        MIGRATION_6_7
                     )
                     .fallbackToDestructiveMigration()
                     .build()

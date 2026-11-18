@@ -47,8 +47,9 @@ object OfflineExpenseAiEngine {
         Regex("""\bInfo\s*:\s*(?:BIL/[A-Z]+/[A-Za-z0-9]+/)?(?!EMI\b)([A-Za-z][A-Za-z0-9 *@._&'-]{2,42}?)(?:\.|,|\s+Avl|\s+Bal|\s+UPI\s+Ref|\s+on\b|\s+Not\s+you|$)""", RegexOption.IGNORE_CASE),
         // 10. NEFT / IMPS / RTGS / ACH / NACH structured tags (supports both numeric & alphanumeric bank refs like NEFT/AUBLH26123/NAME)
         Regex("""\b(?:IMPS|MMT/IMPS|NEFT|RTGS)/(?:[A-Z0-9]+/)?[A-Za-z0-9]+/([^/\n\r.;,]{2,38})""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:ACH|NACH|ECS)\s*(?:D|C|DR|CR)?[-*\s]+([A-Za-z][A-Za-z0-9 .&'-]{2,36}?)(?:[-*]\d|\.|,|\s+on\b|$)""", RegexOption.IGNORE_CASE),
-        Regex("""\bNEFT[*:-][A-Z0-9]{6,14}[*:-]([A-Za-z][A-Za-z0-9 .&'-]{2,36}?)(?:[*:-]|\.|,|$)""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:through|by|via)\s+(?:ACH(?:\s*C)?|NACH|CMS|ECS(?:\s*CR)?|NEFT|RTGS)\s*[:/ \t-]+(?:[A-Z]{4}0?[A-Z0-9]{6,16}\s+)?([A-Za-z][A-Za-z0-9 .'& -]{2,42}?)(?=\.\s|\.$|,|\s+Avl|\s+Bal|$)""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:ACH|NACH|ECS)\s*(?:D|C|DR|CR)?[\s*-]+([A-Za-z][A-Za-z0-9 .'& -]{2,36}?)(?:[*-]\d|\.|,|\s+Avl|\s+Bal|\s+on\b|$)""", RegexOption.IGNORE_CASE),
+        Regex("""\bNEFT[*:-][A-Z0-9]{6,18}[*:\s-]+([A-Za-z][A-Za-z0-9 .'& -]{2,36}?)(?:[*:-]|\.|,|\s+Avl|\s+Bal|$)""", RegexOption.IGNORE_CASE),
         // 11. Axis "debited from A/c no. XX001234 on PAYTM UTILI 28-10-2026"
         Regex("""\bdebited\s+from\s+(?:a/c|acct)\b.{0,30}?\bon\s+([A-Za-z][A-Za-z0-9 *._&-]{2,35}?)(?=\s+\d{1,2}[-/]\d{1,2})""", RegexOption.IGNORE_CASE),
         // 12. SBI "trf to FOODAHOLIC Refno 4263..."
@@ -74,7 +75,7 @@ object OfflineExpenseAiEngine {
     )
 
     private val strongUserCreditRegex = Regex(
-        """(?:\bcredit\s+alert\b|\bpayment\s+of\b.{0,35}?\bhas\s+been\s+received\b|\b(?:a/c|ac|acct|account|card|wallet)\b[^.;]{0,35}?[-\s]credited\b|\bcredited\s+(?:to\s+(?:your\s+)?(?:a/c|ac|acct|account|card|wallet|\w+\s+bank)|with|by|in\s+your|\s*a/c\s+no)\b|\bhas\s+been\s+credited\b|\bis\s+credited\b|\b(?:deposited|received\s+(?:rs\.?|inr|₹|in\s+your|from)|money\s+received|salary\s+credited)\b)""",
+        """(?:\bcredit\s+alert\b|\bpayment\s+of\b.{0,35}?\bhas\s+been\s+received\b|\b(?:a/c|ac|acct|account|card|wallet)\b[^.;]{0,35}?[-\s]credited\b|\bcredited\s+(?:to\s+(?:your\s+)?(?:a/c|ac|acct|account|card|wallet|\w+\s+bank)|with|by|in\s+your|\s*a/c\s+no)\b|\bhas\s+been\s+credited\b|\bis\s+credited\b|\bsalary\s+credited\b|\b(?:deposited|(?:received|rcvd)\s+(?:rs\.?|inr|₹|in\s+your|from)|money\s+received)\b)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -136,11 +137,25 @@ object OfflineExpenseAiEngine {
         val isSelfTransfer = resolution.category == SpendCategory.SELF_TRANSFER ||
             hasDualOwnAccountTransfer(singleLineBody)
 
-        val finalCategory = if (isSelfTransfer) SpendCategory.SELF_TRANSFER else resolution.category
-        val finalDisplayName = if (isSelfTransfer && resolution.category != SpendCategory.SELF_TRANSFER) {
-            "Self Account Transfer"
-        } else {
-            resolution.displayName
+        val salaryResolution = if (direction == TransactionType.CREDIT && !isSelfTransfer) {
+            detectVerifiedSalaryCredit(
+                body = singleLineBody,
+                amount = amount,
+                paymentRail = institution.paymentRail,
+                extractedDisplayName = resolution.displayName,
+                learnedOverridePresent = learnedMap.containsKey(MerchantKnowledgeBase.normalizeForLookup(rawMerchant))
+            )
+        } else null
+
+        val finalCategory = when {
+            isSelfTransfer -> SpendCategory.SELF_TRANSFER
+            salaryResolution != null -> SpendCategory.SALARY
+            else -> resolution.category
+        }
+        val finalDisplayName = when {
+            isSelfTransfer && resolution.category != SpendCategory.SELF_TRANSFER -> "Self Account Transfer"
+            salaryResolution != null -> salaryResolution
+            else -> resolution.displayName
         }
 
         val fingerprint = computeSmsFingerprint(
@@ -153,11 +168,15 @@ object OfflineExpenseAiEngine {
             smsFingerprint = fingerprint,
             amount = amount,
             type = direction.name,
-            merchantRawCode = resolution.rawCode,
+            merchantRawCode = if (salaryResolution != null && resolution.rawCode.length < 3) "SALARY" else resolution.rawCode,
             merchantDisplayName = finalDisplayName,
             category = finalCategory.name,
-            confidenceScore = if (isSelfTransfer) 0.99f else resolution.confidence,
-            matchReason = if (isSelfTransfer) resolution.reason else resolution.reason,
+            confidenceScore = if (isSelfTransfer || salaryResolution != null) 0.99f else resolution.confidence,
+            matchReason = when {
+                isSelfTransfer -> resolution.reason
+                salaryResolution != null -> "Verified corporate salary / payroll credit"
+                else -> resolution.reason
+            },
             bankName = institution.bankName,
             accountLast4 = institution.accountLast4,
             paymentRail = institution.paymentRail.name,
@@ -168,20 +187,94 @@ object OfflineExpenseAiEngine {
             senderAddress = senderAddress,
             sanitizedPreview = OtpFirewall.sanitizePreview(singleLineBody),
             isSelfTransfer = isSelfTransfer,
-            parserVersion = 6,
+            parserVersion = 7,
             fullSmsBody = singleLineBody
         )
 
         return AiParseOutcome.Parsed(entity)
     }
 
+    private val explicitSalaryKeywordRegex = Regex(
+        """\b(?:salary|sal\s+cr|by[\s_-]?salary|payroll|stipend|monthly\s+wages|sal\s+for|towards\s+(?:neft[\s_-]*)?salary)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val bulkCorporatePayrollRailRegex = Regex(
+        """\b(?:ACH\s*C\b|ACH\s*-\s*[A-Za-z]|NACH[-/\s]|CMS[-/\s]|ECS\s*CR\b|BULK\s+POSTING)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val corporateEntityMarkerRegex = Regex(
+        """\b(?:PVT\.?\s*LTD|PRIVATE\s+LIMITED|LIMITED|LTD|LLP|INC|CORP|CORPORATION|TECHNOLOGIES|TECHNOLOGY|SOLUTIONS|SYSTEMS|SERVICES|INFOTECH|CONSULTANCY|CONSULTING|ENTERPRISES|GLOBAL)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val nonSalaryCreditDisqualifiersRegex = Regex(
+        """\b(?:refund(?:ed)?|cashback|reversal|reversed|dividend|div\s+cr|ach\s*c[- ]*div|interest|int\.?\s+pd|fd\s+maturity|rd\s+maturity|mutual\s+fund|redemption|ncl|iccl|cams|kfintech|zerodha|groww|upstox|claim|insurance|loan|disburs|cash\s+deposit|cdm|atm)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * Precision Salary Credit Classifier calibrated on HDFC, ICICI, SBI, Axis, Kotak, IDFC & TRAI SMS templates:
+     * - Never selects random UPI or casual P2P credits.
+     * - Requires explicit payroll markers (SALARY / PAYROLL / STIPEND / BY SALARY / SAL CR) OR
+     *   verified corporate bulk clearing (ACH C- / NACH / CMS) from a registered corporate entity without dividend/refund/MF tags.
+     */
+    private fun detectVerifiedSalaryCredit(
+        body: String,
+        amount: Double,
+        paymentRail: com.moneytracker.vault.domain.model.PaymentRail,
+        extractedDisplayName: String,
+        learnedOverridePresent: Boolean
+    ): String? {
+        if (learnedOverridePresent) return null
+        if (amount < 1000.0) return null
+        if (nonSalaryCreditDisqualifiersRegex.containsMatchIn(body)) return null
+
+        val hasExplicitSalaryWord = explicitSalaryKeywordRegex.containsMatchIn(body)
+        // P2P UPI handles (@okaxis, @ybl, UPI/) are never corporate payroll unless the bank explicitly tagged SALARY in narrative
+        val hasCasualUpiMarker = paymentRail == com.moneytracker.vault.domain.model.PaymentRail.UPI ||
+            body.contains("UPI/", ignoreCase = true) ||
+            Regex("""@[A-Za-z]{2,15}\b""").containsMatchIn(body)
+
+        if (hasCasualUpiMarker && !hasExplicitSalaryWord) return null
+
+        val isCorporateBulkPayroll = !hasCasualUpiMarker &&
+            amount >= 8000.0 &&
+            bulkCorporatePayrollRailRegex.containsMatchIn(body) &&
+            corporateEntityMarkerRegex.containsMatchIn(body)
+
+        if (!hasExplicitSalaryWord && !isCorporateBulkPayroll) return null
+
+        // Format a clean employer / salary display title
+        val cleanedEmployer = extractedDisplayName
+            .replace(Regex("""(?i)[-\s]*(?:salary(?:\s+[a-z]{3,9})?|payroll|sal\s*cr|by\s*salary)\b.*"""), "")
+            .replace(Regex("""(?i)^(?:ach\s*c?[-\s]*|nach[-\s]*|neft[-\s]*|cms[-\s]*)"""), "")
+            .trim()
+
+        val genericNames = setOf(
+            "BANK TRANSFER", "UPI PAYMENT", "DIRECT SPEND", "SALARY", "MONTHLY",
+            "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
+            "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
+            "JAN", "FEB", "MAR", "APR", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
+        )
+
+        return if (cleanedEmployer.length >= 3 &&
+            cleanedEmployer.uppercase() !in genericNames &&
+            !cleanedEmployer.startsWith("UPI ", ignoreCase = true) &&
+            cleanedEmployer.any { it.isLetter() }
+        ) {
+            MerchantKnowledgeBase.prettifyRawName(cleanedEmployer)
+        } else {
+            "Salary Credit"
+        }
+    }
+
     private fun detectTransactionDirection(body: String): TransactionType? {
-        if (reversalOrRefundRegex.containsMatchIn(body) && strongUserCreditRegex.containsMatchIn(body)) {
+        if (reversalOrRefundRegex.containsMatchIn(body) && !body.contains("debited", ignoreCase = true)) {
             return TransactionType.CREDIT
         }
-        if (body.contains("credited", ignoreCase = true) && reversalOrRefundRegex.containsMatchIn(body) &&
-            !body.contains("debited", ignoreCase = true)
-        ) {
+        if (reversalOrRefundRegex.containsMatchIn(body) && strongUserCreditRegex.containsMatchIn(body)) {
             return TransactionType.CREDIT
         }
 
