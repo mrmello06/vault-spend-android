@@ -23,12 +23,15 @@ import com.moneytracker.vault.domain.model.WalletSummary
 import com.moneytracker.vault.sms.SmsInboxScanner
 import com.moneytracker.vault.ui.theme.VaultFormatters
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -101,7 +104,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     private val dao = VaultDatabase.getInstance(appContext).vaultDao()
 
     private val selectedMonthFlow = MutableStateFlow(YearMonth.now())
-    private val searchQueryFlow = MutableStateFlow("")
+    private val rawSearchQueryFlow = MutableStateFlow("")
+    @OptIn(FlowPreview::class)
+    private val debouncedSearchQueryFlow = rawSearchQueryFlow
+        .debounce { query -> if (query.isEmpty()) 0L else 140L }
+        .distinctUntilChanged()
     private val selectedMoneyMatterFlow = MutableStateFlow<MoneyMatterFilter?>(null)
     private val selectedCategoryFlow = MutableStateFlow<SpendCategory?>(null)
     private val selectedAccountFlow = MutableStateFlow<String?>(null)
@@ -136,7 +143,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     private val shortMonthYearFormatter = DateTimeFormatter.ofPattern("MMM yy", Locale.ENGLISH)
 
     private val filtersFlow = combine(
-        searchQueryFlow,
+        debouncedSearchQueryFlow,
         selectedMoneyMatterFlow,
         selectedCategoryFlow,
         selectedAccountFlow,
@@ -480,7 +487,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setSearchQuery(query: String) {
-        searchQueryFlow.value = query
+        rawSearchQueryFlow.value = query
     }
 
     fun toggleMoneyMatterFilter(filter: MoneyMatterFilter) {

@@ -944,22 +944,13 @@ private fun CredHomeSheetContent(
     val keyboardController = LocalSoftwareKeyboardController.current
     val horizontalPad = if (isLandscape) 28.dp else 16.dp
 
-    var searchTextFieldValue by remember {
+    var searchTextFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(
             TextFieldValue(
                 text = uiState.searchQuery,
                 selection = TextRange(uiState.searchQuery.length)
             )
         )
-    }
-
-    LaunchedEffect(uiState.searchQuery) {
-        if (uiState.searchQuery != searchTextFieldValue.text) {
-            searchTextFieldValue = TextFieldValue(
-                text = uiState.searchQuery,
-                selection = TextRange(uiState.searchQuery.length)
-            )
-        }
     }
 
     LazyColumn(
@@ -1373,7 +1364,7 @@ private fun CredHomeSheetContent(
                         )
                     }
                     uiState.aiSearchSuggestions.forEach { term ->
-                        val active = uiState.searchQuery.equals(term, ignoreCase = true)
+                        val active = searchTextFieldValue.text.equals(term, ignoreCase = true)
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
@@ -1384,7 +1375,9 @@ private fun CredHomeSheetContent(
                                     RoundedCornerShape(10.dp)
                                 )
                                 .clickable {
-                                    onSearchQueryChange(if (active) "" else term)
+                                    val nextQuery = if (active) "" else term
+                                    searchTextFieldValue = TextFieldValue(nextQuery, selection = TextRange(nextQuery.length))
+                                    onSearchQueryChange(nextQuery)
                                 }
                                 .padding(horizontal = 11.dp, vertical = 5.dp)
                         ) {
