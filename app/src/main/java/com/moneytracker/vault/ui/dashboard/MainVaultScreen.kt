@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1366,8 +1367,8 @@ private fun CredHomeSheetContent(
                 }
 
                 // Active Category Filter Indicator Pill
-                if (uiState.selectedCategory != null) {
-                    val activeCat = uiState.selectedCategory!!
+                val activeCat = uiState.selectedCategory
+                if (activeCat != null) {
                     val count = uiState.filteredTransactions.size
                     Row(
                         modifier = Modifier
@@ -2444,6 +2445,8 @@ private fun CredProfileModalSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 0.dp, bottomEnd = 0.dp),
+        windowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = VaultColors.CredWhite,
         scrimColor = Color.Black.copy(alpha = 0.65f),
         dragHandle = {
@@ -2569,12 +2572,14 @@ private fun CredProfileModalSheet(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    if (isAppLockEnabled) {
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                    CredPrimaryPillButton(
-                        label = "lock app now",
-                        onClick = onLockVaultNow
-                    )
+                        CredPrimaryPillButton(
+                            label = "lock app now",
+                            onClick = onLockVaultNow
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 

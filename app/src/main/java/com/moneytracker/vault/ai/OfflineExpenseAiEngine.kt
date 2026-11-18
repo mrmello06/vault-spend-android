@@ -46,6 +46,7 @@ object OfflineExpenseAiEngine {
         // 9. Info block (excluding bare EMI numbers handled separately)
         Regex("""\bInfo\s*:\s*(?:BIL/[A-Z]+/[A-Za-z0-9]+/)?(?!EMI\b)([A-Za-z][A-Za-z0-9 *@._&'-]{2,42}?)(?:\.|,|\s+Avl|\s+Bal|\s+UPI\s+Ref|\s+on\b|\s+Not\s+you|$)""", RegexOption.IGNORE_CASE),
         // 10. NEFT / IMPS / RTGS / ACH / NACH structured tags (supports both numeric & alphanumeric bank refs like NEFT/AUBLH26123/NAME)
+        Regex("""\b(?:for\s+)?NEFT\s+(?:Cr|Dr)?[-:/\s]+[A-Z]{4}0?[A-Z0-9]{6,16}[-:/\s]+([A-Za-z][A-Za-z0-9 .'& -]{2,45}?)(?:-[A-Za-z0-9\s]+)?(?=\.Avl|\.Cheque|\.|\$|,|$)""", RegexOption.IGNORE_CASE),
         Regex("""\b(?:IMPS|MMT/IMPS|NEFT|RTGS)/(?:[A-Z0-9]+/)?[A-Za-z0-9]+/([^/\n\r.;,]{2,38})""", RegexOption.IGNORE_CASE),
         Regex("""\b(?:through|by|via)\s+(?:ACH(?:\s*C)?|NACH|CMS|ECS(?:\s*CR)?|NEFT|RTGS)\s*[:/ \t-]+(?:[A-Z]{4}0?[A-Z0-9]{6,16}\s+)?([A-Za-z][A-Za-z0-9 .'& -]{2,42}?)(?=\.\s|\.$|,|\s+Avl|\s+Bal|$)""", RegexOption.IGNORE_CASE),
         Regex("""\b(?:ACH|NACH|ECS)\s*(?:D|C|DR|CR)?[\s*-]+([A-Za-z][A-Za-z0-9 .'& -]{2,36}?)(?:[*-]\d|\.|,|\s+Avl|\s+Bal|\s+on\b|$)""", RegexOption.IGNORE_CASE),
@@ -75,7 +76,7 @@ object OfflineExpenseAiEngine {
     )
 
     private val strongUserCreditRegex = Regex(
-        """(?:\bcredit\s+alert\b|\bpayment\s+of\b.{0,35}?\bhas\s+been\s+received\b|\b(?:a/c|ac|acct|account|card|wallet)\b[^.;]{0,35}?[-\s]credited\b|\bcredited\s+(?:to\s+(?:your\s+)?(?:a/c|ac|acct|account|card|wallet|\w+\s+bank)|with|by|in\s+your|\s*a/c\s+no)\b|\bhas\s+been\s+credited\b|\bis\s+credited\b|\bsalary\s+credited\b|\b(?:deposited|(?:received|rcvd)\s+(?:rs\.?|inr|₹|in\s+your|from)|money\s+received)\b)""",
+        """(?:\bcredit\s+alert\b|\bpayment\s+of\b.{0,35}?\bhas\s+been\s+received\b|\b(?:a/c|ac|acct|account|card|wallet)\b[^.;]{0,35}?[-\s]credited\b|\bcredited\s+(?:to\s+(?:your\s+)?(?:a/c|ac|acct|account|card|wallet|\w+\s+bank)|with|by|in\s+your|\s*a/c\s+no)\b|\bhas\s+been\s+credited\b|\bis\s+credited\b|\bsalary\s+credited\b|\b(?:deposited|(?:received|rcvd)\s+(?:rs\.?|inr|₹|in\s+your|from)|money\s+received)\b|\bneft\s+cr\b)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -200,12 +201,12 @@ object OfflineExpenseAiEngine {
     )
 
     private val bulkCorporatePayrollRailRegex = Regex(
-        """\b(?:ACH\s*C\b|ACH\s*-\s*[A-Za-z]|NACH[-/\s]|CMS[-/\s]|ECS\s*CR\b|BULK\s+POSTING)\b""",
+        """\b(?:ACH\s*C\b|ACH\s*-\s*[A-Za-z]|NACH[-/\s]|CMS[-/\s]|ECS\s*CR\b|BULK\s+POSTING|NEFT(?:\s*Cr)?|NEFT/)\b""",
         RegexOption.IGNORE_CASE
     )
 
     private val corporateEntityMarkerRegex = Regex(
-        """\b(?:PVT\.?\s*LTD|PRIVATE\s+LIMITED|LIMITED|LTD|LLP|INC|CORP|CORPORATION|TECHNOLOGIES|TECHNOLOGY|SOLUTIONS|SYSTEMS|SERVICES|INFOTECH|CONSULTANCY|CONSULTING|ENTERPRISES|GLOBAL)\b""",
+        """\b(?:PVT\.?\s*LTD|PRIVATE\s+LIMITED|LIMITED|LTD|LLP|INC|CORP|CORPORATION|TECHNOLOGIES|TECHNOLOGY|SOLUTIONS|SYSTEMS|SERVICES|INFOTECH|CONSULTANCY|CONSULTING|ENTERPRISES|GLOBAL|LARSEN|TOUBRO|L&T|LARS|TCS|INFOSYS|WIPRO|TATA|COGNIZANT|ACCENTURE|HCL)\b""",
         RegexOption.IGNORE_CASE
     )
 
@@ -218,9 +219,9 @@ object OfflineExpenseAiEngine {
      * Precision Salary Credit Classifier calibrated on HDFC, ICICI, SBI, Axis, Kotak, IDFC & TRAI SMS templates:
      * - Never selects random UPI or casual P2P credits.
      * - Requires explicit payroll markers (SALARY / PAYROLL / STIPEND / BY SALARY / SAL CR) OR
-     *   verified corporate bulk clearing (ACH C- / NACH / CMS) from a registered corporate entity without dividend/refund/MF tags.
+     *   verified corporate bulk clearing (ACH C- / NACH / CMS / NEFT) from a registered corporate entity without dividend/refund/MF tags.
      */
-    private fun detectVerifiedSalaryCredit(
+    internal fun detectVerifiedSalaryCredit(
         body: String,
         amount: Double,
         paymentRail: com.moneytracker.vault.domain.model.PaymentRail,
@@ -247,7 +248,7 @@ object OfflineExpenseAiEngine {
         if (!hasExplicitSalaryWord && !isCorporateBulkPayroll) return null
 
         // Format a clean employer / salary display title
-        val cleanedEmployer = extractedDisplayName
+        var cleanedEmployer = extractedDisplayName
             .replace(Regex("""(?i)[-\s]*(?:salary(?:\s+[a-z]{3,9})?|payroll|sal\s*cr|by\s*salary)\b.*"""), "")
             .replace(Regex("""(?i)^(?:ach\s*c?[-\s]*|nach[-\s]*|neft[-\s]*|cms[-\s]*)"""), "")
             .trim()
@@ -258,6 +259,18 @@ object OfflineExpenseAiEngine {
             "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
             "JAN", "FEB", "MAR", "APR", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
         )
+
+        if (cleanedEmployer.isBlank() || cleanedEmployer.uppercase() in genericNames) {
+            if (body.contains("LARSEN AND TOUBRO", ignoreCase = true) ||
+                (body.contains("NEFT", ignoreCase = true) && body.contains("/LARS", ignoreCase = true))
+            ) {
+                cleanedEmployer = "Larsen & Toubro"
+            }
+        } else if (cleanedEmployer.equals("LARS", ignoreCase = true) ||
+            cleanedEmployer.contains("LARSEN", ignoreCase = true)
+        ) {
+            cleanedEmployer = "Larsen & Toubro"
+        }
 
         return if (cleanedEmployer.length >= 3 &&
             cleanedEmployer.uppercase() !in genericNames &&

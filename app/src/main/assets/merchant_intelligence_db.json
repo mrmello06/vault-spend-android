@@ -1,5 +1,6 @@
 {
   "merchants": [
+    {"codes": ["LARSEN AND TOUBRO", "LARSEN & TOUBRO", "LARSEN AND TOUBRO LIMITED", "LARS", "L&T"], "name": "Larsen & Toubro", "cat": "SALARY", "sub": false},
     {"codes": ["GOOGLEONE", "GOOGLE ONE", "GOOGLE*GOOGLE ONE", "GOOGLE*GOOGLEONE", "GOOG ONE"], "name": "Google One", "cat": "ENTERTAINMENT", "sub": true},
     {"codes": ["YOUTUBE", "GOOGLEYOUTUBE", "GOOGLE*YOUTUBE", "YOUTUBEPREMIUM", "YT PREMIUM"], "name": "YouTube Premium", "cat": "ENTERTAINMENT", "sub": true},
     {"codes": ["GOOGLEPLAY", "GOOGLE PLAY", "GOOGLE*PLAY", "GPAY PLAYSTORE", "PLAY STORE", "GOOG-PAYMENTS", "GOOG PAYMENTS"], "name": "Google Play / GPay", "cat": "ENTERTAINMENT", "sub": false},

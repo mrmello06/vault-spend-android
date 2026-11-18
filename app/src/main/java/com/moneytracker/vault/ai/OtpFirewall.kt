@@ -55,7 +55,7 @@ object OtpFirewall {
     )
 
     private val completedTransactionVerbPattern = Regex(
-        """\b(?:debited|credited|spent|paid|sent|received|withdrawn|deducted|charged|purchase\s+of|purchase\s+worth|txn\s+of|transaction\s+of|trf\s+to|transferred)\b""",
+        """\b(?:debited|credited|spent|paid|sent|received|withdrawn|deducted|charged|deposited|deposit|purchase\s+of|purchase\s+worth|txn\s+of|transaction\s+of|trf\s+to|transferred|neft\s+cr|ach\s+cr|cms\s+cr|cr[-:])\b""",
         RegexOption.IGNORE_CASE
     )
 

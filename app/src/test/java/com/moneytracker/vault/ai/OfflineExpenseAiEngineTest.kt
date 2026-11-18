@@ -169,5 +169,24 @@ class OfflineExpenseAiEngineTest {
 
         val tRef = (OfflineExpenseAiEngine.parseSms("AD-HDFCBK-S", refund, 107L) as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
         assertFalse(tRef.category == SpendCategory.SALARY.name)
+        // Test real HDFC corporate payroll deposited format with Larsen & Toubro
+        val realHdfcLntSalary = "Update! INR 27,536.00 deposited in HDFC Bank A/c XX4192 on 28-OCT-26 for NEFT Cr-ICIC0099999-LARSEN AND TOUBRO LIMITED-AJAY  A-INXXXXXXXXXX2810.Avl bal INR 37,184.02. Cheque deposits in A/C are subject to clearing"
+        val outHdfcLnt = OfflineExpenseAiEngine.parseSms("JD-HDFCBK-S", realHdfcLntSalary, 108L)
+        assertTrue(outHdfcLnt is OfflineExpenseAiEngine.AiParseOutcome.Parsed)
+        val tHdfcLnt = (outHdfcLnt as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertEquals(SpendCategory.SALARY.name, tHdfcLnt.category)
+        assertEquals(TransactionType.CREDIT.name, tHdfcLnt.type)
+        assertEquals(27536.0, tHdfcLnt.amount, 0.001)
+        assertEquals("Larsen & Toubro", tHdfcLnt.merchantDisplayName)
+
+        // Test real Axis corporate payroll NEFT format with LARS
+        val realAxisLntSalary = "INR 33402.00 credited to A/c no. XX5694 on 25-06-26 at 13:32:49 IST. Info - NEFT/IN22617635727901/LARS. Chk Bal https://ccm.axis.bank.in/AXISBK/ltt3Dvko - Axis Bank"
+        val outAxisLnt = OfflineExpenseAiEngine.parseSms("JX-AXISBK-S", realAxisLntSalary, 109L)
+        assertTrue(outAxisLnt is OfflineExpenseAiEngine.AiParseOutcome.Parsed)
+        val tAxisLnt = (outAxisLnt as OfflineExpenseAiEngine.AiParseOutcome.Parsed).transaction
+        assertEquals(SpendCategory.SALARY.name, tAxisLnt.category)
+        assertEquals(TransactionType.CREDIT.name, tAxisLnt.type)
+        assertEquals(33402.0, tAxisLnt.amount, 0.001)
+        assertEquals("Larsen & Toubro", tAxisLnt.merchantDisplayName)
     }
 }

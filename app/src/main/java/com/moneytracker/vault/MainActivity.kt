@@ -210,6 +210,7 @@ class MainActivity : FragmentActivity() {
                                     activity = this@MainActivity,
                                     authManager = authManager,
                                     startInResetMode = isResettingPasscode,
+                                    onCancelReset = { isResettingPasscode = false },
                                     onAuthenticated = {
                                         hasSecQuestions = authManager.hasSecurityQuestionsConfigured()
                                         isResettingPasscode = false

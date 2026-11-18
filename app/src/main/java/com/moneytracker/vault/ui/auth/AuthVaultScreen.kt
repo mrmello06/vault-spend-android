@@ -77,6 +77,7 @@ import kotlin.math.roundToInt
 
 private enum class AuthStage {
     UNLOCK_PIN,
+    VERIFY_CURRENT_PIN_FOR_CHANGE,
     CREATE_NEW_PIN,
     SETUP_SECURITY_QUESTIONS,
     VERIFY_SECURITY_QUESTIONS_FOR_RESET
@@ -87,6 +88,7 @@ fun AuthVaultScreen(
     activity: FragmentActivity,
     authManager: VaultAuthManager,
     startInResetMode: Boolean = false,
+    onCancelReset: () -> Unit = {},
     onAuthenticated: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
@@ -96,7 +98,7 @@ fun AuthVaultScreen(
         mutableStateOf(
             when {
                 !authManager.isPasscodeConfigured() -> AuthStage.CREATE_NEW_PIN
-                startInResetMode -> AuthStage.CREATE_NEW_PIN
+                startInResetMode -> AuthStage.VERIFY_CURRENT_PIN_FOR_CHANGE
                 else -> AuthStage.UNLOCK_PIN
             }
         )
@@ -110,6 +112,7 @@ fun AuthVaultScreen(
     var statusText by remember(stage) {
         mutableStateOf(
             when (stage) {
+                AuthStage.VERIFY_CURRENT_PIN_FOR_CHANGE -> "ENTER CURRENT 4-DIGIT PASSCODE"
                 AuthStage.CREATE_NEW_PIN ->
                     if (startInResetMode) "ENTER NEW 4-DIGIT PASSCODE" else "CREATE YOUR 4-DIGIT PASSCODE"
                 AuthStage.UNLOCK_PIN -> "ENTER PASSCODE TO UNLOCK"
@@ -223,25 +226,40 @@ fun AuthVaultScreen(
         pinInput += digit
 
         if (pinInput.length == 4) {
-            if (stage == AuthStage.CREATE_NEW_PIN) {
-                if (firstPinDraft.isEmpty()) {
-                    firstPinDraft = pinInput
-                    pinInput = ""
-                    statusText = "CONFIRM YOUR 4-DIGIT PASSCODE"
-                } else if (firstPinDraft == pinInput) {
-                    authManager.setupPasscode(pinInput)
-                    playUnlockAnimationThenProceed()
-                } else {
-                    firstPinDraft = ""
-                    pinInput = ""
-                    triggerErrorShake("PASSCODES DID NOT MATCH • TRY AGAIN")
+            when (stage) {
+                AuthStage.VERIFY_CURRENT_PIN_FOR_CHANGE -> {
+                    if (authManager.verifyPasscode(pinInput)) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        pinInput = ""
+                        firstPinDraft = ""
+                        stage = AuthStage.CREATE_NEW_PIN
+                        statusText = "ENTER NEW 4-DIGIT PASSCODE"
+                    } else {
+                        pinInput = ""
+                        triggerErrorShake("INCORRECT CURRENT PASSCODE")
+                    }
                 }
-            } else {
-                if (authManager.verifyPasscode(pinInput)) {
-                    playUnlockAnimationThenProceed()
-                } else {
-                    pinInput = ""
-                    triggerErrorShake("INCORRECT PASSCODE")
+                AuthStage.CREATE_NEW_PIN -> {
+                    if (firstPinDraft.isEmpty()) {
+                        firstPinDraft = pinInput
+                        pinInput = ""
+                        statusText = "CONFIRM YOUR 4-DIGIT PASSCODE"
+                    } else if (firstPinDraft == pinInput) {
+                        authManager.setupPasscode(pinInput)
+                        playUnlockAnimationThenProceed()
+                    } else {
+                        firstPinDraft = ""
+                        pinInput = ""
+                        triggerErrorShake("PASSCODES DID NOT MATCH • TRY AGAIN")
+                    }
+                }
+                else -> {
+                    if (authManager.verifyPasscode(pinInput)) {
+                        playUnlockAnimationThenProceed()
+                    } else {
+                        pinInput = ""
+                        triggerErrorShake("INCORRECT PASSCODE")
+                    }
                 }
             }
         }
@@ -328,6 +346,19 @@ fun AuthVaultScreen(
                                 .clickable(onClick = onForgotClick)
                                 .padding(horizontal = 14.dp, vertical = 6.dp)
                         )
+                    } else if (startInResetMode) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "← cancel",
+                            fontFamily = CredSansFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFD1D5DB),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable(onClick = onCancelReset)
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
                     }
                 }
 
@@ -398,6 +429,19 @@ fun AuthVaultScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .clickable(onClick = onForgotClick)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    } else if (startInResetMode) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "← cancel",
+                            fontFamily = CredSansFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFD1D5DB),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable(onClick = onCancelReset)
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                         )
                     } else {
@@ -485,6 +529,7 @@ private fun LockHeaderAndPinDots(
         Text(
             text = when {
                 isUnlockSuccess -> "vault unlocked"
+                stage == AuthStage.VERIFY_CURRENT_PIN_FOR_CHANGE -> "verify current passcode"
                 stage == AuthStage.CREATE_NEW_PIN -> "set passcode"
                 else -> "unlock vault"
             },

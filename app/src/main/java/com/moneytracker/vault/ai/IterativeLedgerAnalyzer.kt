@@ -275,7 +275,7 @@ object IterativeLedgerAnalyzer {
     }
 
     private val corporatePayrollEntityRegex = Regex(
-        """\b(?:PVT\.?\s*LTD|PRIVATE\s+LIMITED|LIMITED|LTD|LLP|INC|CORP|CORPORATION|TECHNOLOGIES|TECHNOLOGY|SOLUTIONS|SYSTEMS|SERVICES|INFOTECH|CONSULTANCY|CONSULTING|GLOBAL)\b""",
+        """\b(?:PVT\.?\s*LTD|PRIVATE\s+LIMITED|LIMITED|LTD|LLP|INC|CORP|CORPORATION|TECHNOLOGIES|TECHNOLOGY|SOLUTIONS|SYSTEMS|SERVICES|INFOTECH|CONSULTANCY|CONSULTING|GLOBAL|LARSEN|TOUBRO|L&T|LARS)\b""",
         RegexOption.IGNORE_CASE
     )
 
@@ -291,7 +291,38 @@ object IterativeLedgerAnalyzer {
         var updates = 0
         val zone = ZoneId.systemDefault()
 
-        // 4A. Propagate confirmed corporate Salary employers to other monthly bank-transfer credits from the same employer
+        // 4A. Directly evaluate all non-modified credits against Precision Salary Engine
+        for (txn in all) {
+            if (txn.isUserModified || txn.isSelfTransfer || txn.type != TransactionType.CREDIT.name) continue
+            if (txn.category != SpendCategory.SALARY.name) {
+                val rail = try {
+                    PaymentRail.valueOf(txn.paymentRail)
+                } catch (e: Exception) {
+                    PaymentRail.BANK_TRANSFER
+                }
+                val salaryRes = OfflineExpenseAiEngine.detectVerifiedSalaryCredit(
+                    body = txn.fullSmsBody,
+                    amount = txn.amount,
+                    paymentRail = rail,
+                    extractedDisplayName = txn.merchantDisplayName,
+                    learnedOverridePresent = false
+                )
+                if (salaryRes != null) {
+                    dao.updateSingleTransactionFull(
+                        transactionId = txn.id,
+                        displayName = salaryRes,
+                        category = SpendCategory.SALARY.name,
+                        note = txn.note,
+                        isIncludedInSpend = false,
+                        isSelfTransfer = false
+                    )
+                    dao.resetUserModifiedFlag(txn.id)
+                    updates++
+                }
+            }
+        }
+
+        // 4B. Propagate confirmed corporate Salary employers to other monthly bank-transfer credits from the same employer
         val confirmedSalaryEmployerNames = all
             .filter {
                 it.type == TransactionType.CREDIT.name &&
