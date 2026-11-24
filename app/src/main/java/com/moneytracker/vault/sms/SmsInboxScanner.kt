@@ -44,7 +44,15 @@ object SmsInboxScanner {
             MerchantKnowledgeBase.normalizeForLookup(it.normalizedKey)
         }
 
+        val existingSnapshot = dao.getAllTransactionsSnapshot()
+        val dedupBuckets = HashMap<String, MutableList<TransactionEntity>>(existingSnapshot.size + 64)
+        for (existing in existingSnapshot) {
+            val key = "${existing.type}|${existing.accountLast4}|${kotlin.math.round(existing.amount * 100)}"
+            dedupBuckets.getOrPut(key) { mutableListOf() }.add(existing)
+        }
+
         val parsedBatch = mutableListOf<TransactionEntity>()
+        val backfillCandidates = mutableListOf<TransactionEntity>()
         var scanned = 0
 
         val projection = arrayOf(
@@ -72,7 +80,17 @@ object SmsInboxScanner {
 
                 when (val outcome = OfflineExpenseAiEngine.parseSms(sender, body, timestamp, learnedMap, context)) {
                     is OfflineExpenseAiEngine.AiParseOutcome.Parsed -> {
-                        parsedBatch.add(outcome.transaction)
+                        val candidate = outcome.transaction
+                        backfillCandidates.add(candidate)
+                        val key = "${candidate.type}|${candidate.accountLast4}|${kotlin.math.round(candidate.amount * 100)}"
+                        val bucket = dedupBuckets.getOrPut(key) { mutableListOf() }
+                        val isDup = bucket.any { existing ->
+                            OfflineExpenseAiEngine.isNearDuplicateTransaction(existing, candidate)
+                        }
+                        if (!isDup) {
+                            bucket.add(candidate)
+                            parsedBatch.add(candidate)
+                        }
                     }
                     else -> Unit
                 }
@@ -88,7 +106,7 @@ object SmsInboxScanner {
 
         val missingBodySet = dao.getFingerprintsMissingFullSmsBody().toHashSet()
         if (missingBodySet.isNotEmpty()) {
-            for (txn in parsedBatch) {
+            for (txn in backfillCandidates) {
                 if (txn.smsFingerprint in missingBodySet && txn.fullSmsBody.isNotBlank()) {
                     dao.backfillFullSmsBody(txn.smsFingerprint, txn.fullSmsBody)
                 }

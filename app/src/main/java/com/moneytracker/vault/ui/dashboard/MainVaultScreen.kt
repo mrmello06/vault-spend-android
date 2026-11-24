@@ -2,14 +2,26 @@ package com.moneytracker.vault.ui.dashboard
 
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -634,24 +646,35 @@ private fun CredTopBar(
                     .clickable(onClick = onPrevMonth)
                     .padding(2.dp)
             )
-            Text(
-                text = monthLabel.lowercase(),
-                fontFamily = CredSansFontFamily,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = VaultColors.InkPrimary,
-                modifier = Modifier
-                    .clickable(onClick = onJumpCurrentMonth)
-                    .padding(horizontal = 6.dp)
-            )
-            if (!isCurrentMonth) {
-                Box(
+            AnimatedContent(
+                targetState = monthLabel.lowercase(),
+                transitionSpec = {
+                    (fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 4 })
+                        .togetherWith(fadeOut(tween(140)) + slideOutVertically(tween(140)) { -it / 4 })
+                },
+                label = "monthLabelTransition"
+            ) { label ->
+                Text(
+                    text = label,
+                    fontFamily = CredSansFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = VaultColors.InkPrimary,
                     modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(VaultColors.DebitRed)
+                        .clickable(onClick = onJumpCurrentMonth)
+                        .padding(horizontal = 6.dp)
                 )
-                Spacer(modifier = Modifier.width(3.dp))
+            }
+            AnimatedVisibility(visible = !isCurrentMonth) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(VaultColors.DebitRed)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                }
             }
             Icon(
                 imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
@@ -680,12 +703,18 @@ private fun CredTopBar(
                     .clickable(onClick = onToggleTheme),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (isAmoledDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
-                    contentDescription = if (isAmoledDark) "Switch to Light Mode" else "Switch to AMOLED Black",
-                    tint = if (isAmoledDark) VaultColors.ChampagneGold else VaultColors.InkPrimary,
-                    modifier = Modifier.size(17.dp)
-                )
+                Crossfade(
+                    targetState = isAmoledDark,
+                    animationSpec = tween(220),
+                    label = "themeIconCrossfade"
+                ) { dark ->
+                    Icon(
+                        imageVector = if (dark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
+                        contentDescription = if (dark) "Switch to Light Mode" else "Switch to AMOLED Black",
+                        tint = if (dark) VaultColors.ChampagneGold else VaultColors.InkPrimary,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
             }
 
             // 2. Search Button
@@ -716,19 +745,25 @@ private fun CredTopBar(
                     .clickable(onClick = onRefreshClick),
                 contentAlignment = Alignment.Center
             ) {
-                if (isSyncing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = VaultColors.InkPrimary
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Outlined.Refresh,
-                        contentDescription = "Sync SMS",
-                        tint = VaultColors.InkPrimary,
-                        modifier = Modifier.size(17.dp)
-                    )
+                Crossfade(
+                    targetState = isSyncing,
+                    animationSpec = tween(200),
+                    label = "syncIconCrossfade"
+                ) { syncing ->
+                    if (syncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = VaultColors.InkPrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = "Sync SMS",
+                            tint = VaultColors.InkPrimary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
                 }
             }
         }
@@ -761,17 +796,27 @@ private fun CredLiquidGlassBottomBar(
             )
             .clip(RoundedCornerShape(28.dp))
             .background(
-                if (VaultColors.isAmoledDark) Color(0xCC090B10) else Color(0xD9FFFFFF)
+                if (VaultColors.isAmoledDark) Color(0xCC090B10) else Color(0xDCF8FAFC)
             )
             .border(
                 width = 1.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.42f),
-                        Color.White.copy(alpha = 0.10f),
-                        Color(0xFF93C5FD).copy(alpha = 0.30f)
+                brush = if (VaultColors.isAmoledDark) {
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.42f),
+                            Color.White.copy(alpha = 0.10f),
+                            Color(0xFF93C5FD).copy(alpha = 0.30f)
+                        )
                     )
-                ),
+                } else {
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(0x280F172A),
+                            Color(0x120F172A),
+                            Color(0x383B82F6)
+                        )
+                    )
+                },
                 shape = RoundedCornerShape(28.dp)
             )
             .padding(4.dp)
@@ -791,23 +836,43 @@ private fun CredLiquidGlassBottomBar(
                     }
                     .clip(RoundedCornerShape(24.dp))
                     .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.22f),
-                                Color(0xFFA5C9FF).copy(alpha = 0.10f),
-                                Color.White.copy(alpha = 0.14f)
+                        if (VaultColors.isAmoledDark) {
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.22f),
+                                    Color(0xFFA5C9FF).copy(alpha = 0.10f),
+                                    Color.White.copy(alpha = 0.14f)
+                                )
                             )
-                        )
+                        } else {
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0x1E0F172A),
+                                    Color(0x183B82F6),
+                                    Color(0x120F172A)
+                                )
+                            )
+                        }
                     )
                     .border(
                         width = 1.2.dp,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.65f),
-                                Color.White.copy(alpha = 0.14f),
-                                Color(0xFF93C5FD).copy(alpha = 0.45f)
+                        brush = if (VaultColors.isAmoledDark) {
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.65f),
+                                    Color.White.copy(alpha = 0.14f),
+                                    Color(0xFF93C5FD).copy(alpha = 0.45f)
+                                )
                             )
-                        ),
+                        } else {
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0x3D0F172A),
+                                    Color(0x1A0F172A),
+                                    Color(0x4D2563EB)
+                                )
+                            )
+                        },
                         shape = RoundedCornerShape(24.dp)
                     )
             )
@@ -865,6 +930,26 @@ private fun CredSlimDockItem(
         derivedStateOf { pagerState.currentPage == tab.ordinal }
     }
 
+    val targetColor = when {
+        selected && VaultColors.isAmoledDark -> Color.White
+        selected && !VaultColors.isAmoledDark -> VaultColors.InkPrimary
+        !selected && VaultColors.isAmoledDark -> Color(0xFF8A91A0)
+        else -> Color(0xFF64748B)
+    }
+    val itemColor by animateColorAsState(
+        targetValue = targetColor,
+        animationSpec = tween(durationMillis = 200),
+        label = "dockItemColor"
+    )
+    val iconScale by animateFloatAsState(
+        targetValue = if (selected) 1.12f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = 0.65f,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "dockIconScale"
+    )
+
     if (isLandscape) {
         Row(
             modifier = modifier
@@ -877,8 +962,13 @@ private fun CredSlimDockItem(
             Icon(
                 imageVector = if (selected) activeIcon else inactiveIcon,
                 contentDescription = tab.name,
-                tint = if (selected) Color.White else Color(0xFF8A91A0),
-                modifier = Modifier.size(18.dp)
+                tint = itemColor,
+                modifier = Modifier
+                    .size(18.dp)
+                    .graphicsLayer {
+                        scaleX = iconScale
+                        scaleY = iconScale
+                    }
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
@@ -887,7 +977,7 @@ private fun CredSlimDockItem(
                 fontSize = 10.sp,
                 fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
                 letterSpacing = 1.1.sp,
-                color = if (selected) Color.White else Color(0xFF828998)
+                color = itemColor
             )
         }
     } else {
@@ -902,8 +992,13 @@ private fun CredSlimDockItem(
             Icon(
                 imageVector = if (selected) activeIcon else inactiveIcon,
                 contentDescription = tab.name,
-                tint = if (selected) Color.White else Color(0xFF8A91A0),
-                modifier = Modifier.size(21.dp)
+                tint = itemColor,
+                modifier = Modifier
+                    .size(21.dp)
+                    .graphicsLayer {
+                        scaleX = iconScale
+                        scaleY = iconScale
+                    }
             )
             Spacer(modifier = Modifier.height(3.dp))
             Text(
@@ -912,7 +1007,7 @@ private fun CredSlimDockItem(
                 fontSize = 9.5.sp,
                 fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
                 letterSpacing = 1.1.sp,
-                color = if (selected) Color.White else Color(0xFF828998)
+                color = itemColor
             )
         }
     }
@@ -921,6 +1016,7 @@ private fun CredSlimDockItem(
 // =========================================================================
 // HOME TAB: HERO OUTFLOW + MONEY MATTERS + SEARCH + EXPLORE + TRANSACTIONS
 // =========================================================================
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CredHomeSheetContent(
     uiState: VaultUiState,
@@ -1551,7 +1647,8 @@ private fun CredHomeSheetContent(
                 ) { txn ->
                     CredTransactionRowCard(
                         txn = txn,
-                        onClick = { onTransactionClick(txn) }
+                        onClick = { onTransactionClick(txn) },
+                        modifier = Modifier.animateItemPlacement(tween(220))
                     )
                 }
             }
@@ -1573,12 +1670,32 @@ private fun CredMoneyMatterCapsule(
     borderColor: Color,
     onClick: () -> Unit
 ) {
+    val animatedBg by animateColorAsState(
+        targetValue = bgColor,
+        animationSpec = tween(200),
+        label = "capsuleBg"
+    )
+    val animatedBorder by animateColorAsState(
+        targetValue = borderColor,
+        animationSpec = tween(200),
+        label = "capsuleBorder"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.03f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
+        label = "capsuleScale"
+    )
+
     Row(
         modifier = Modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .height(50.dp)
             .clip(RoundedCornerShape(50))
-            .background(bgColor)
-            .border(if (selected) 1.6.dp else 1.dp, borderColor, RoundedCornerShape(50))
+            .background(animatedBg)
+            .border(if (selected) 1.6.dp else 1.dp, animatedBorder, RoundedCornerShape(50))
             .clickable(onClick = onClick)
             .padding(horizontal = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1625,7 +1742,8 @@ private fun CredMoneyMatterCapsule(
 @Composable
 private fun CredTransactionRowCard(
     txn: TransactionEntity,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
     val isSelf = txn.isSelfTransfer || txn.category == SpendCategory.SELF_TRANSFER.name
@@ -1683,7 +1801,7 @@ private fun CredTransactionRowCard(
     val shape = RoundedCornerShape(14.dp)
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .then(
                 if (!VaultColors.isAmoledDark && !isExcluded) {

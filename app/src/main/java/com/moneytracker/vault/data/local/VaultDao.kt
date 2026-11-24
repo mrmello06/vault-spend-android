@@ -15,6 +15,9 @@ interface VaultDao {
     @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
     suspend fun getAllTransactionsSnapshot(): List<TransactionEntity>
 
+    @Query("SELECT * FROM transactions WHERE timestamp BETWEEN :startMs AND :endMs")
+    suspend fun getTransactionsInWindow(startMs: Long, endMs: Long): List<TransactionEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTransactionsIgnoreDuplicates(items: List<TransactionEntity>): List<Long>
 
@@ -131,6 +134,9 @@ interface VaultDao {
 
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteTransaction(id: Long)
+
+    @Query("DELETE FROM transactions WHERE id IN (:ids)")
+    suspend fun deleteTransactionsByIds(ids: List<Long>)
 
     @Query("DELETE FROM transactions WHERE senderAddress LIKE 'DEMO-%'")
     suspend fun clearDemoTransactions()

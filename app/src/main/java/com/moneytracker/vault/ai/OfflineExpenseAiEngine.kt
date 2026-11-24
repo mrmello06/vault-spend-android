@@ -389,10 +389,28 @@ object OfflineExpenseAiEngine {
         senderAddress: String,
         singleLineBody: String
     ): String {
-        val bucket = timestampMillis / 5_000L
+        val bucket = timestampMillis / 120_000L
         val cleanSender = senderAddress.uppercase().takeLast(6)
         val raw = "$bucket|$cleanSender|${singleLineBody.lowercase().take(140)}"
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
         return digest.take(16).joinToString("") { "%02x".format(it) }
+    }
+
+    fun isNearDuplicateTransaction(a: TransactionEntity, b: TransactionEntity): Boolean {
+        if (a.type != b.type) return false
+        if (kotlin.math.abs(a.amount - b.amount) >= 0.01) return false
+        if (a.accountLast4 != b.accountLast4) return false
+        if (kotlin.math.abs(a.timestamp - b.timestamp) > 120_000L) return false
+
+        if (a.smsFingerprint == b.smsFingerprint) return true
+
+        val bodyA = a.fullSmsBody.trim()
+        val bodyB = b.fullSmsBody.trim()
+        if (bodyA.isNotEmpty() && bodyB.isNotEmpty()) {
+            return bodyA.equals(bodyB, ignoreCase = true)
+        }
+
+        return a.sanitizedPreview.isNotBlank() &&
+            a.sanitizedPreview.equals(b.sanitizedPreview, ignoreCase = true)
     }
 }

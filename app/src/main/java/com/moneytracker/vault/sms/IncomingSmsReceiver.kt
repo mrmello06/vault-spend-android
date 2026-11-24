@@ -38,8 +38,15 @@ class IncomingSmsReceiver : BroadcastReceiver() {
 
                 when (val outcome = OfflineExpenseAiEngine.parseSms(sender, combinedBody, timestamp, learnedMap, appContext)) {
                     is OfflineExpenseAiEngine.AiParseOutcome.Parsed -> {
-                        dao.insertTransactionIgnoreDuplicate(outcome.transaction)
-                        IterativeLedgerAnalyzer.analyzeAndRefineLedger(dao)
+                        val txn = outcome.transaction
+                        val nearby = dao.getTransactionsInWindow(txn.timestamp - 120_000L, txn.timestamp + 120_000L)
+                        val isDuplicate = nearby.any { existing ->
+                            OfflineExpenseAiEngine.isNearDuplicateTransaction(existing, txn)
+                        }
+                        if (!isDuplicate) {
+                            dao.insertTransactionIgnoreDuplicate(txn)
+                            IterativeLedgerAnalyzer.analyzeAndRefineLedger(dao)
+                        }
                     }
                     else -> Unit
                 }

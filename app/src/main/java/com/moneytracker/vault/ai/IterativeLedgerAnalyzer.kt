@@ -63,6 +63,8 @@ object IterativeLedgerAnalyzer {
     )
 
     suspend fun analyzeAndRefineLedger(dao: VaultDao): TrainingSummary {
+        removeDuplicateTransactions(dao)
+
         var passes = 0
         var passUpdates: Int
 
@@ -79,6 +81,43 @@ object IterativeLedgerAnalyzer {
             selfTransfersIdentified = finalSnapshot.count { it.isSelfTransfer || it.category == SpendCategory.SELF_TRANSFER.name },
             merchantsResolved = finalSnapshot.count { it.category != SpendCategory.OTHERS.name }
         )
+    }
+
+    /**
+     * Removes historical duplicate rows created by SMSC vs Inbox timestamp drift.
+     * Preserves any user-modified row first, or the earliest inserted row.
+     */
+    private suspend fun removeDuplicateTransactions(dao: VaultDao) {
+        val all = dao.getAllTransactionsSnapshot()
+        if (all.size < 2) return
+
+        // Sort so preferred rows (userModified first, then lowest id) are kept first
+        val prioritized = all.sortedWith(
+            compareByDescending<TransactionEntity> { it.isUserModified }
+                .thenBy { it.id }
+        )
+
+        val buckets = HashMap<String, MutableList<TransactionEntity>>(prioritized.size)
+        val idsToDelete = mutableListOf<Long>()
+
+        for (txn in prioritized) {
+            val key = "${txn.type}|${txn.accountLast4}|${kotlin.math.round(txn.amount * 100)}"
+            val group = buckets.getOrPut(key) { mutableListOf() }
+            val isDuplicate = group.any { kept ->
+                OfflineExpenseAiEngine.isNearDuplicateTransaction(kept, txn)
+            }
+            if (isDuplicate) {
+                idsToDelete.add(txn.id)
+            } else {
+                group.add(txn)
+            }
+        }
+
+        if (idsToDelete.isNotEmpty()) {
+            idsToDelete.chunked(500).forEach { chunk ->
+                dao.deleteTransactionsByIds(chunk)
+            }
+        }
     }
 
     private suspend fun runSingleTrainingPass(dao: VaultDao): Int {
